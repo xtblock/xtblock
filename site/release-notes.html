@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Release notes · XTblock</title><meta name="description" content="A permissioned, sharded, EVM-compatible blockchain with a desktop operator console and a developer portal.">
+<link rel="icon" href="data:,"><link rel="stylesheet" href="assets/style.css"></head>
+<body>
+<header class="site-header"><div class="wrap">
+  <a class="brand" href="index.html"><span class="logo">XT</span><span>XTblock</span></a>
+  <nav>
+    <a href="index.html#downloads" class="">Download</a>
+    <a href="operator.html" class="">Operator manual</a>
+    <a href="developer.html" class="">Developer manual</a>
+    <a href="release-notes.html" class="on">Release notes</a>
+    <a href="https://github.com/XTblock/xtblock" rel="noopener">GitHub</a>
+    <button id="theme" aria-label="Toggle theme" title="Toggle theme">◐</button>
+  </nav>
+</div></header><div class="wrap"><main class="prose narrow"><h1 id="xtb-testnet-release-notes-xtcn-0-10-32-console-0-8-77">XTB Testnet release notes (xtcn 0.10.32 / console 0.8.77)</h1>
+<h2 id="included">Included</h2>
+<ul>
+<li>0.10.32 event history length: the delegate keeps events for <code>event_log_retention_blocks</code> blocks (default 86,400, about a day at 1 s blocks) up to <code>event_log_max_entries</code> logs (default 500,000), both settable in node.toml; the index is organised by block number so range queries stay fast, and delegates apply address/topic filters themselves. <code>eth_getLogs</code> answers with an error asking you to narrow the range when more than 10,000 logs match on a shard. Upgrade all delegates and xtgw together.</li>
+<li>0.10.31 event index persistence: each delegate appends its event logs to <code>event-logs-&lt;chain&gt;-&lt;index&gt;.bin</code> next to its chain state and reloads them at startup, so <code>eth_getLogs</code> keeps its history across restarts. Fork auto-recovery moves the file into the fork backup with the rest of the state. Upgrade all delegates and xtgw together.</li>
+<li>0.10.30 events and gas: contract events appear in receipts and in <code>eth_getLogs</code>; receipts report the real <code>gasUsed</code>. Fixes a bug where the proposing delegate had no receipt data for its own blocks, so a receipt answered by the leader could show success and 0 gas even for a reverted transaction. All delegates and xtgw must run 0.10.30 (new messages). <code>receipts_root</code> is unchanged, so existing chains keep validating. The portal shows gas used and decoded events after a write.</li>
+<li>0.10.29 developer portal: every xtgw serves a web page at its RPC port (<code>http://&lt;xtgw-host&gt;:&lt;rpc-port&gt;/</code>) with wallet, contract deploy (shard-aligning self-transfers are sent automatically), contract call/read, explorer (blocks, transactions, addresses, 2PC records) and faucet. Developers need no delegate, no Console and no MetaMask setup. Deploy contracts with the portal or the Console only; use MetaMask for transfers and calls.</li>
+<li>0.10.29 xtgw faucet (testnet only): set <code>faucet_private_key_hex</code> (optional <code>faucet_drip_wei</code>, default 1 XTT; <code>faucet_cooldown_secs</code>, default 3600) in the chain&#39;s <code>[[chains]]</code> entry of xtgw.toml. Network-map-driven gateways (no <code>[[chains]]</code> entry) put the same three <code>faucet_*</code> lines at the TOP LEVEL of xtgw.toml, before the first <code>[table]</code>/<code>[[table]]</code> header. The key sits in plain text; use a dedicated account holding only test funds. The account must be funded at genesis or by a transfer, and its own shard must be reachable.</li>
+<li>Console 0.8.77 Developer mode (top-bar toggle): hides node-management screens (instances, New chain, Tools, Connect, Add operator) and shows the portal for a gateway address, plus Keys, Shard lookup and Manuals.</li>
+<li>Wallet txs (MetaMask/Remix) work end to end: eth_chain_id auto-derived on delegates, receipts with contractAddress, eth_getCode, xtgw relay logging.</li>
+<li>Fork auto-recovery (backup + state-sync, 3 attempts) instead of permanent halt; requires auto-restart.</li>
+<li>No built-in per-block synthetic txs for new chains (<code>synthetic_txs = false</code>).</li>
+<li>Console: constructor args, log search, bulk auto-restart, Faucet, Explorer Checkpoints panel, Cross-shard (2PC) tool (per-shard transfers or contract calls with ABI builder, shard and balance checks).</li>
+<li>Console Contract deploy/call and Faucet go through the xtgw RPC (wallet-style signing); no delegate selection. Needs xtcn 0.10.24+ on the Console machine.</li>
+<li>xtgw rejects wallet contract deployments whose address would hash to another shard (error tells which nonce to use).</li>
+<li>From 0.10.24 every node checks <code>zero_gas_mode</code> / <code>fee_market_enabled</code> / treasury against the signed genesis manifest on EVERY start (before, only on a fresh start), and refuses to start on a mismatch.</li>
+<li>From 0.10.28: a delegate whose election view disagrees with the group (rejects a quorum-verified block as &quot;proposer N is not a legitimate leader&quot;) now runs the fork auto-recovery (state sync) instead of retrying forever; xtgw reads each shard from a delegate at the majority-committed tip and warns about delegates that are behind; the &quot;inert value-only call&quot; WARNING only appears for calls with calldata.</li>
+<li>From 0.10.28: xtgw <code>eth_estimateGas</code> returns a realistic value for contract creation and calls with calldata (it used to always answer 21000, so Console deploys got &quot;gas limit 27300&quot;, ran out of gas and never created the contract).</li>
+<li>Console 0.8.75: Contract deploy/call modals have a &quot;Refresh balance&quot; button next to each wallet balance.</li>
+<li>From 0.10.28: xtgw sends each wallet-signed transaction to EVERY delegate of the sender&#39;s shard (a delegate only proposes from its own mempool; a standby/suspended one used to hold the tx forever, so deploys and transfers were never mined).</li>
+<li>Gas fix: empty-data call to a contract gets 300k gas.</li>
+</ul>
+<h2 id="known-limitations">Known limitations</h2>
+<ul>
+<li>Events: <code>eth_getLogs</code> and receipt <code>logs</code> work (address/topic filters, shard block numbers), but cover about a day per shard by default (configurable, persisted on disk since 0.10.31, absent for blocks a delegate only synced); no <code>blockHash</code> filter, no <code>eth_newFilter</code>/subscriptions, <code>logsBloom</code> is zero. Plain transfers report <code>gasUsed</code> 0.</li>
+<li>Contracts deployed via wallets may hash to another shard than the deployer -&gt; inert calls (use console deploy).</li>
+<li>Receipts/tx locations are in-memory (lost on restart).</li>
+<li>All delegates must run the same version.</li>
+</ul>
+</main></div>
+<footer class="site-footer"><div class="wrap"><span>© 2026 XTblock</span><span>XTblock XTB-Testnet-003 · xtcn 0.10.32 · Console 0.8.77</span></div></footer>
+<script src="assets/site.js"></script></body></html>

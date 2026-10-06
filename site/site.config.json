@@ -1,0 +1,10 @@
+{
+  "orgName": "XTblock",
+  "productName": "XTblock",
+  "tagline": "A permissioned, sharded, EVM-compatible blockchain with a desktop operator console and a developer portal.",
+  "githubRepo": "XTblock/xtblock",
+  "networkName": "XTB-Testnet-003",
+  "xtcnVersion": "0.10.32",
+  "consoleVersion": "0.8.77",
+  "website": "https://xtblock.io"
+}

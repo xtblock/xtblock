@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Developer manual · XTblock</title><meta name="description" content="Developer manual for XTblock">
+<link rel="icon" href="data:,"><link rel="stylesheet" href="assets/style.css"></head>
+<body>
+<header class="site-header"><div class="wrap">
+  <a class="brand" href="index.html"><span class="logo">XT</span><span>XTblock</span></a>
+  <nav>
+    <a href="index.html#downloads" class="">Download</a>
+    <a href="operator.html" class="">Operator manual</a>
+    <a href="developer.html" class="on">Developer manual</a>
+    <a href="release-notes.html" class="">Release notes</a>
+    <a href="https://github.com/XTblock/xtblock" rel="noopener">GitHub</a>
+    <button id="theme" aria-label="Toggle theme" title="Toggle theme">◐</button>
+  </nav>
+</div></header><div class="wrap doc"><aside class="toc"><input id="tocFilter" placeholder="Filter sections…" aria-label="Filter sections"><a class="d2" href="#quick-start-deploy-and-call-a-contract-end-to-end">Quick Start — deploy and call a contract end to end</a><a class="d2" href="#1-introduction-glossary">1. Introduction &amp; Glossary</a><a class="d2" href="#2-connecting-to-the-chain">2. Connecting to the Chain</a><a class="d2" href="#3-writing-compiling-smart-contracts">3. Writing &amp; Compiling Smart Contracts</a><a class="d2" href="#4-deploying-a-contract-via-console-ui">4. Deploying a Contract via Console UI</a><a class="d2" href="#5-interacting-with-contracts-transactions-via-console">5. Interacting with Contracts &amp; Transactions via Console</a><a class="d2" href="#6-debugging-tools-in-console-for-dapp-developers">6. Debugging Tools in Console for DApp Developers</a><a class="d2" href="#7-known-limitations-compatibility-notes">7. Known Limitations &amp; Compatibility Notes</a><a class="d2" href="#8-cross-shard-transactions-2pc-what-they-do-and-do-not-do">8. Cross-shard transactions (2PC) — what they do and do not do</a><a class="d2" href="#9-building-on-xtblock-without-running-a-delegate">9. Building on XTblock without running a delegate</a></aside><main class="prose"><h1 id="xtblock-developer-manual">XTblock Developer Manual</h1>
+<p>2026-10-06 — covers xtcn 0.10.32 / Console 0.8.77</p>
+<h2 id="quick-start-deploy-and-call-a-contract-end-to-end">Quick Start — deploy and call a contract end to end</h2>
+<p>A fully worked walkthrough, start to finish, using the <code>Counter</code> contract from §3.</p>
+<ol start="0">
+<li><strong>Easiest route (no install, no delegate):</strong> open <code>http://&lt;xtgw-host&gt;:&lt;rpc-port&gt;/</code> in a browser. The <strong>developer portal</strong> served by every xtgw (0.10.29+) has Wallet, Deploy, Call, Explorer and Faucet tabs and does steps 2, 4 and 6 below for you. The Console&#39;s <strong>Developer mode</strong> (top-bar toggle) shows the same portal inside the Console.</li>
+<li><strong>Get a chain to point at.</strong> Ask your operator for an <code>xtgw</code> RPC URL and chain ID, or stand up your own local solo chain (Operator Manual — Quick Start) if testing independently.</li>
+<li><strong>Get a funded account.</strong> If the operator enabled the gateway faucet (<code>xt_chainInfo</code> shows <code>faucet.enabled</code>), use the portal&#39;s Faucet tab. Otherwise the Console has a <strong>Tools → Faucet</strong> utility your operator can use to send you test XTT — send them your wallet address.</li>
+<li><strong>Compile</strong> <code>Counter.sol</code> (§3) to get <code>Counter.bin</code> and <code>Counter.abi</code>.</li>
+<li><strong>Deploy</strong> via Console → Contract deploy / call → Deploy (§4), or the ethers.js script in §4&#39;s example. Note the deployed address.</li>
+<li><strong>Verify</strong> the deploy landed, using §4&#39;s <code>eth_call</code> check.</li>
+<li><strong>Call <code>increment()</code></strong>, then <strong>read <code>get()</code></strong>, via Console&#39;s Call tab or the ethers.js example in §5. Confirm the returned value increased by 1.</li>
+<li><strong>Check the real receipt status</strong> (§6) on the <code>increment()</code> transaction — confirm <code>status: 0x1</code>.</li>
+</ol>
+<p>That&#39;s the full loop. §2–§7 cover the details this quick start skipped over: RPC methods, ABI-driven calls, debugging tools, and known limitations.</p>
+<h2 id="1-introduction-glossary">1. Introduction &amp; Glossary</h2>
+<p>XTblock runs a real EVM execution engine (<code>revm</code>) inside a sharded, multi-delegate consensus system. Standard Solidity contracts compile and execute unmodified; what differs from a conventional single-chain EVM deployment is how a transaction reaches the chain and which shard it lands on. This manual covers writing, deploying, and calling contracts through the XTblock Console.</p>
+<p><strong>Glossary</strong></p>
+<ul>
+<li><strong>RealTx</strong> — the internal enum covering every transaction kind XTblock executes. The two kinds a contract developer submits are <code>SignedTransfer</code> and <code>RawEthTransfer</code> (below); others (<code>CreditApplication</code>, <code>TwoPcRecord</code>, <code>CheckpointRecord</code>) are internal, not developer-facing.</li>
+<li><strong>SignedTransfer</strong> — XTblock&#39;s own native signed-transaction format (fields, not RLP-encoded). Submitted directly to delegate addresses over the node-to-node transport — this is an operator/tooling path, not the one a wallet uses.</li>
+<li><strong>RawEthTransfer</strong> — a real, raw RLP-encoded legacy (type-0) Ethereum transaction, exactly what a wallet like MetaMask signs and sends. This is the path a dApp and a real wallet use, submitted via <code>eth_sendRawTransaction</code> through <code>xtgw</code>.</li>
+<li><strong>revm</strong> — the real Rust EVM implementation executing contract bytecode. Gives full EVM semantics (CALL, CREATE, storage, logs, reverts) — not a simplified or partial interpreter.</li>
+<li><strong>Shard affinity</strong> — a contract&#39;s code always executes on its deployer&#39;s own home shard, regardless of which shard its computed address would otherwise hash to. The Console enforces this at deploy time (§4).</li>
+<li><strong>mempool_cap</strong> — the per-block inclusion limit for pending transactions (operator-configured; see the Operator Manual §4). Relevant to a developer mainly as a throughput ceiling to expect under load, not something a dApp configures.</li>
+<li><strong>Legacy-only transactions</strong> — XTblock currently supports type-0 (legacy, EIP-155-signed) transactions only. No EIP-1559 (type-2) support. Detailed in §7.</li>
+</ul>
+<p><strong>Who this manual is for</strong>: an in-house developer with Console access, and an external/client-side developer working only against the RPC endpoint. Every deploy/call/debug section below gives both paths — <strong>Option A (Console UI)</strong>, if you have Console, and <strong>Option B (RPC only)</strong>, which needs nothing but the <code>xtgw</code> RPC URL and standard tools (ethers.js, curl). A few debugging tools (§6) are <strong>Console-only</strong>, with no RPC equivalent today — flagged where that&#39;s the case.</p>
+<p><strong>What Console gives a developer that a bare RPC endpoint doesn&#39;t</strong>: a shard-aware deploy/call form (tells you which shard a sender or contract is actually on before you submit, instead of a silent misroute or a mempool rejection after the fact), ABI-driven call encoding, and the same forensic tooling operators use (Explorer, divergence timeline, real per-transaction receipt status) for debugging a dApp&#39;s own transactions.</p>
+<p><strong>Example — the two transaction paths, in outline:</strong></p>
+<pre><code class="language-js">// RawEthTransfer: the wallet/dApp path, a real legacy-signed RLP transaction
+const tx = await wallet.sendTransaction({ to, value, data, gasLimit, gasPrice });
+// submitted as eth_sendRawTransaction under the hood — see §2
+</code></pre>
+<pre><code class="language-bash"># SignedTransfer: XTblock&#39;s own operator/tooling path — NOT used by wallets/dApps
+xtcn --submit-tx &lt;shard_id&gt; &lt;to_hex&gt; &lt;amount&gt; auto &lt;calldata_hex&gt; &lt;sender_private_key_hex&gt;
+</code></pre>
+<h2 id="2-connecting-to-the-chain">2. Connecting to the Chain</h2>
+<p><strong>RPC endpoint</strong>: every <code>xtgw</code> instance exposes standard <code>eth_*</code> JSON-RPC plus XTblock-specific <code>xt_*</code> methods, over the host/port your operator gives you. Register it in the Console under Explorer → <strong>Known chains</strong> (chain ID + host + port) so both the Console&#39;s own tooling and any read calls can reach it.</p>
+<p><strong>Supported RPC methods</strong> (the subset relevant to dApp development):</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>eth_chainId</code></td>
+<td>Chain ID for wallet/tooling configuration</td>
+</tr>
+<tr>
+<td><code>eth_blockNumber</code> / <code>xt_getLatestBlockNumber</code></td>
+<td>Current block height</td>
+</tr>
+<tr>
+<td><code>eth_getBalance</code> / <code>eth_getTransactionCount</code></td>
+<td>Account balance / nonce</td>
+</tr>
+<tr>
+<td><code>eth_gasPrice</code> / <code>eth_estimateGas</code></td>
+<td>Gas pricing and estimation</td>
+</tr>
+<tr>
+<td><code>eth_sendRawTransaction</code></td>
+<td>Submit a signed legacy transaction (the <code>RawEthTransfer</code> path)</td>
+</tr>
+<tr>
+<td><code>eth_call</code></td>
+<td>Read-only call (view/pure functions, or any call you don&#39;t want to broadcast)</td>
+</tr>
+<tr>
+<td><code>eth_getTransactionByHash</code> / <code>eth_getTransactionReceipt</code></td>
+<td>Look up a submitted transaction and its real execution status</td>
+</tr>
+<tr>
+<td><code>eth_getCode</code></td>
+<td>Contract bytecode (checked on the home shard first, then the others); <code>0x</code> if none. Remix calls this before every contract transaction</td>
+</tr>
+<tr>
+<td><code>eth_getBlockByNumber</code> / <code>eth_getBlockByHash</code> / <code>xt_getBlock</code></td>
+<td>Block data</td>
+</tr>
+<tr>
+<td><code>eth_syncing</code></td>
+<td>Always returns <code>false</code> — no partial-sync state is exposed over RPC</td>
+</tr>
+</tbody></table>
+<p><strong>Wallet setup</strong>: point a standard wallet (MetaMask or similar) at the <code>xtgw</code> RPC URL and the chain ID from <code>eth_chainId</code>. No custom wallet software is required — XTblock deliberately omits <code>baseFeePerGas</code> from block responses so wallets default to legacy (type-0) transactions automatically (§7).</p>
+<p><strong>Where the chain ID from <code>eth_chainId</code> comes from</strong>: it&#39;s deterministic, not something your operator typically assigns by hand — derived from the chain&#39;s internal <code>chain_id</code> string via a <code>blake3</code> hash truncated to 4 bytes, so the same chain always reports the same <code>eth_chainId</code> across restarts and across every <code>xtgw</code> instance in front of it. Ask your operator for it once (or read it straight off the RPC) and save it in your wallet/SDK config — it won&#39;t change unless the operator deliberately sets an explicit override (Operator Manual §4).</p>
+<p><strong>Remix Studio</strong>: works the same way — Remix&#39;s <strong>Injected Provider – MetaMask</strong> environment hands signing to MetaMask, which sends <code>eth_sendRawTransaction</code> to whichever RPC MetaMask is pointed at. No XTblock-specific setup: connect MetaMask to the <code>xtgw</code> RPC URL + chain ID as above, then select &quot;Injected Provider – MetaMask&quot; in Remix&#39;s <strong>Deploy &amp; Run Transactions</strong> panel. Caveat: Remix&#39;s <strong>At Address</strong> feature, used to reattach to an existing contract and backfill its historical event log, typically depends on <code>eth_getLogs</code> — not implemented here (§7). A fresh deploy-and-interact session in one sitting works fine; re-attaching later to pull past event history likely won&#39;t.</p>
+<p><strong>MetaMask settings (testnet)</strong>: Network name <code>XTB-Testnet-003</code>, RPC URL = your operator&#39;s <code>xtgw</code> URL (e.g. <code>http://192.168.1.10:9120</code> on a LAN), Chain ID = the decimal value from <code>eth_chainId</code> (e.g. <code>0xe9ae183d</code> = 3920500797), <strong>Currency symbol <code>XTT</code></strong>. Remix hardcodes the label &quot;ETH&quot; next to amounts and its <strong>Value</strong> field is global (Deploy &amp; Run panel) — set it to the amount before calling a payable function, then reset it to 0. The amounts are real XTT regardless of the label.</p>
+<p><strong>Every shard delegate must report the same <code>eth_chainId</code> as <code>xtgw</code>.</strong> From xtcn 0.10.20 delegates derive it automatically from the network chain; on older builds, set <code>eth_chain_id</code> in every shard delegate&#39;s <code>node.toml</code>, or wallet transactions are silently dropped (the delegate logs &quot;rejected a gossiped SubmitRawEthTx — real EIP-155 signature failed to recover&quot;).</p>
+<p><strong>Receipts</strong>: <code>status</code> is real, and <code>contractAddress</code> is returned for a successful creation. From xtcn 0.10.30 <code>gasUsed</code> is the real gas of the transaction (plain value transfers still report 0 because they do not run through the EVM) and <code>logs</code> holds the events the contract emitted (address, topics, data, logIndex). <code>logsBloom</code> is still all zeros and <code>cumulativeGasUsed</code> equals <code>gasUsed</code>. Events are indexed by each delegate (default about one day of blocks per shard, set by the operator) and survive restarts (xtcn 0.10.31+); they are not available for blocks a delegate only received through state sync (§7).</p>
+<p><strong>Same-shard deployment rule</strong>: a contract lives on its deployer&#39;s home shard, and its address is <code>CREATE(sender, nonce)</code>; it must hash to the same shard as the deployer to be callable. xtgw enforces this: a wallet deployment whose address would land on another shard is rejected with a message giving the nonce to use — send that many 0-value self-transfers to advance your nonce, then deploy again. The Console deploy path does this automatically.</p>
+<p><strong>Transaction types accepted</strong>: legacy (type-0) only. A wallet or SDK that forces a type-2 (EIP-1559) transaction will be rejected — see §7 for the exact error and why.</p>
+<p><strong>Example — basic RPC calls a dApp needs at startup:</strong></p>
+<pre><code class="language-bash">curl -s http://localhost:8645 -X POST -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_chainId&quot;,&quot;params&quot;:[]}&#39;
+
+curl -s http://localhost:8645 -X POST -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getBalance&quot;,&quot;params&quot;:[&quot;0xYourAddress&quot;,&quot;latest&quot;]}&#39;
+</code></pre>
+<pre><code class="language-js">// ethers.js: point a standard provider at the xtgw RPC URL, nothing XTblock-specific needed
+import { JsonRpcProvider, Wallet } from &quot;ethers&quot;;
+const provider = new JsonRpcProvider(&quot;http://localhost:8645&quot;);
+const wallet = new Wallet(PRIVATE_KEY, provider);
+console.log(await provider.getNetwork()); // chainId from eth_chainId
+</code></pre>
+<p><strong>Funding a new account</strong></p>
+<p>Testnet funds come from the <strong>Console faucet</strong> (Tools → Faucet): the operator enters a funded sender key (EVM secp256k1), enters the xtgw RPC, an amount (XTT or wei, with a live digit count) and one or more recipient addresses. The Console signs a standard wallet-style transaction (needs xtcn 0.10.22+ installed) and sends it through the xtgw, shows the sender&#39;s and recipients&#39; shards and balances, refuses amounts above the sender&#39;s balance, and confirms each credit (60-second per-address cooldown). Recipients must be on the sender&#39;s shard. There is no public faucet RPC — ask your operator and give them your wallet address.</p>
+<p>Why a MetaMask (EVM) address can hold XTT: all accounts are secp256k1 with Ethereum Keccak address derivation — XTT is the chain&#39;s native token for every address. Ed25519 is only the delegates&#39; consensus key.</p>
+<h2 id="3-writing-compiling-smart-contracts">3. Writing &amp; Compiling Smart Contracts</h2>
+<p>Because execution runs on a real <code>revm</code> instance, contracts are written and compiled with standard Ethereum tooling — nothing XTblock-specific is needed at the language or compiler level.</p>
+<ul>
+<li><strong>Language</strong>: Solidity (or any language targeting EVM bytecode).</li>
+<li><strong>Compiler</strong>: <code>solc</code>, Hardhat, Foundry, or Remix — whichever you already use. Compile to get <strong>init bytecode</strong> (for deployment) and, separately, the contract&#39;s <strong>ABI</strong> (for calling functions afterward).</li>
+<li><strong>What&#39;s standard EVM behavior, unchanged</strong>: <code>CALL</code>, <code>CREATE</code>, storage reads/writes, events/logs, reverts, <code>msg.sender</code>/<code>msg.value</code> semantics.</li>
+<li><strong>What to keep in mind while writing, specific to this chain</strong>:<ul>
+<li>A contract&#39;s code executes only on its deployer&#39;s own home shard (§1, §4) — a contract that needs to interact with state on a different shard needs cross-shard design (2PC), not a same-shard assumption.</li>
+<li><code>receive()</code>/<code>fallback()</code>: a call with empty calldata routes to <code>receive()</code> if defined, exactly per EVM spec — this has caused real confusion where a <code>deposit()</code> call reverted to <code>receive()</code> silently because calldata encoded empty by mistake (§5 covers how to catch this in Console before sending).</li>
+<li>No EIP-1559 fee-market opcodes/behavior to design around from the contract side — gas pricing is legacy-style (§7).</li>
+</ul>
+</li>
+</ul>
+<p>Once you have bytecode + ABI, proceed to §4 (Deploying) and §5 (Interacting).</p>
+<p><strong>Example — a minimal contract and standard compile step (nothing XTblock-specific):</strong></p>
+<pre><code class="language-solidity">// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+contract Counter {
+    uint256 public count;
+
+    function increment() external {
+        count += 1;
+    }
+
+    function get() external view returns (uint256) {
+        return count;
+    }
+}
+</code></pre>
+<pre><code class="language-bash">solc --bin --abi Counter.sol -o build/
+# build/Counter.bin  -&gt; init bytecode, used in §4 (Deploy)
+# build/Counter.abi  -&gt; ABI JSON, used in §5 (Call)
+</code></pre>
+<h2 id="4-deploying-a-contract-via-console-ui">4. Deploying a Contract via Console UI</h2>
+<p><strong>Option A — Console UI</strong> (requires Console access). Console: <strong>Contract deploy / call</strong> → <strong>Deploy</strong> tab. The Console signs a standard wallet-style (legacy EIP-155) transaction locally and sends it through the <strong>xtgw RPC</strong> — no delegate or <code>node.toml</code> needed (requires xtcn 0.10.23+ installed next to the Console).</p>
+<ol>
+<li><strong>Set the xtgw RPC</strong> (<code>host:port</code>) at the top of the modal — it is picked from Explorer → Known chains automatically, or type one.</li>
+<li><strong>Enter the sender&#39;s EVM private key</strong> (secp256k1, 64 hex digits — the same kind of key as a MetaMask account key; never an Ed25519 key, which is only a delegate&#39;s consensus key). The Console shows which shard the sender belongs to. Generate one under Tools → <strong>Keys → Generate EVM key + address</strong>.</li>
+<li><strong>Paste init bytecode (hex, no <code>0x</code>)</strong> — the compiled bytecode from §3. For a constructor with parameters, paste the contract <strong>ABI</strong> too: the Console shows one input per parameter (like Remix) and encodes them for you. Without an ABI you can paste ABI-encoded constructor-argument hex yourself.</li>
+<li><strong>Shard target</strong>: <em>Same as sender&#39;s shard</em> (recommended) or <em>Specific shard N</em>. A contract&#39;s code always lives on its deployer&#39;s shard, so a specific shard only works if the sender key is on that shard (the Console tells you otherwise). The Console reads the sender&#39;s nonce from the xtgw and, if needed, advances it with 0-value self-transfers until the contract address also hashes to the target shard.</li>
+<li>Click <strong>Deploy</strong>. The Console waits for the receipt and shows the status and the contract address.</li>
+<li>Click <strong>Verify <code>0x&lt;address&gt;</code> is deployed</strong> to confirm the deployment actually landed: this runs a real, empty-calldata <code>eth_call</code> against the address and checks for real code, rather than trusting the predicted address alone.</li>
+</ol>
+<p><strong>Known limitation</strong>: contract code survives a restart; contract <strong>storage</strong> does not yet persist between blocks — a separate, still-open item. Confirm with your operator whether this affects your demo/test scenario before relying on persisted contract state across a restart.</p>
+<p><strong>Same-shard deployment isn&#39;t Console-exclusive.</strong> <code>xtgw</code>&#39;s <code>eth_sendRawTransaction</code> handler derives the sender&#39;s home shard from their address (<code>shard_for_address</code>) and routes every submission there automatically — the same rule the receiving delegate independently re-checks and enforces regardless of how the transaction arrived. Console&#39;s &quot;Sender is on shard N&quot; display and locked shard-target field are a visibility convenience, not a requirement: Option B below (raw <code>eth_sendRawTransaction</code>, Remix, ethers.js) gets the same correct, automatic same-shard deployment with no Console or <code>xtcn</code> CLI involved.</p>
+<p><strong>Option B — Scripted deploy (RPC only, no Console needed).</strong> The path for a developer without Console access — equivalent to the Console&#39;s Deploy tab above, using nothing but the <code>xtgw</code> RPC URL:</p>
+<p>Prefer a GUI over a script? Remix Studio&#39;s <strong>Deploy &amp; Run Transactions</strong> panel (Injected Provider – MetaMask) makes the same <code>eth_sendRawTransaction</code> call — see §2&#39;s &quot;Remix Studio&quot; note for setup and its one caveat.</p>
+<pre><code class="language-js">import { JsonRpcProvider, Wallet, ContractFactory } from &quot;ethers&quot;;
+import fs from &quot;fs&quot;;
+
+const provider = new JsonRpcProvider(&quot;http://localhost:8645&quot;);
+const wallet = new Wallet(PRIVATE_KEY, provider);
+
+const bytecode = &quot;0x&quot; + fs.readFileSync(&quot;build/Counter.bin&quot;, &quot;utf8&quot;).trim();
+const abi = JSON.parse(fs.readFileSync(&quot;build/Counter.abi&quot;, &quot;utf8&quot;));
+
+const factory = new ContractFactory(abi, bytecode, wallet);
+const contract = await factory.deploy(); // legacy tx under the hood — no EIP-1559 fields
+await contract.waitForDeployment();
+console.log(&quot;deployed at&quot;, await contract.getAddress());
+</code></pre>
+<p><strong>Verify it landed (same check the Console&#39;s &quot;Verify is deployed&quot; button runs):</strong></p>
+<pre><code class="language-bash">curl -s http://localhost:8645 -X POST -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x&lt;deployed address&gt;&quot;,&quot;data&quot;:&quot;0x&quot;},&quot;latest&quot;]}&#39;
+</code></pre>
+<h2 id="5-interacting-with-contracts-transactions-via-console">5. Interacting with Contracts &amp; Transactions via Console</h2>
+<p><strong>Option A — Console UI</strong> (requires Console access). Console: <strong>Contract deploy / call</strong> → <strong>Call</strong> tab.</p>
+<ol>
+<li><strong>Set the xtgw RPC</strong> (same field as Deploy). Reads, writes and receipts all go through it; no <code>node.toml</code> is needed.</li>
+<li><strong>Enter the contract address (hex, no <code>0x</code>)</strong>. The Console shows which shard it is on. A call only works when the <strong>sender key is on the same shard as the contract</strong>: once you enter the sender&#39;s EVM key, the Console shows the sender&#39;s shard and a green ✓ (same shard) or an amber ✗ (different shard — the call silently does nothing, acting like a plain value transfer).</li>
+<li><strong>Paste the contract ABI (JSON)</strong> — required for every call, to keep one consistent, unambiguous path (matching Remix&#39;s own behavior) rather than a second, editable-calldata fallback.</li>
+<li><strong>Pick the function</strong> from the dropdown built off the ABI. For a function with arguments, fill each argument field (type-hinted placeholders shown). The exact calldata this will send is shown read-only underneath, so a mismatch (e.g. an accidental empty-calldata call routing to <code>receive()</code> instead of your intended function, §3) is visible before you send, not discovered afterward in delegate logs.</li>
+<li><strong>Read vs. write, handled automatically</strong>:</li>
+</ol>
+<ul>
+<li>A <code>view</code>/<code>pure</code> function is read via <code>eth_call</code> — no nonce, no private key, no broadcast. Button reads <strong>Read (no tx)</strong>. Optionally set <strong>Read as address</strong> if the function reads <code>msg.sender</code> internally (e.g. a <code>myBalance()</code>-style call) — only relevant there; a function taking an address as an explicit argument doesn&#39;t need this.</li>
+<li>Any other function requires <strong>Nonce</strong> (default <code>auto</code>) and the <strong>sender&#39;s private key</strong>, and is submitted as a real transaction. Console again shows which shard the sender is on and warns — here the mismatch is a hard mempool rejection, not a silent misroute.</li>
+</ul>
+<ol start="6">
+<li><strong>Value</strong> only appears for a function whose ABI marks it <code>payable</code>.</li>
+<li>Click <strong>Read (no tx)</strong> or <strong>Send transaction</strong>.</li>
+</ol>
+<p><strong>Keys</strong>: Deploy, Call, Read-as and the Faucet all take an <strong>EVM (secp256k1) private key</strong>. Ed25519 keys cannot sign transactions.</p>
+<p><strong>Cross-shard note</strong>: this only works at all if the sender&#39;s key belongs to the same shard as the contract (§7). Calling a contract from a key on a different shard doesn&#39;t error — it silently executes as a no-op on the caller&#39;s own shard, where the contract has no code.</p>
+<p><strong>Confirming a write actually landed</strong>: check the transaction via <code>eth_getTransactionReceipt</code> (Explorer → Search, or RPC directly). Real per-transaction <code>status</code> (success/revert) and <code>gasUsed</code> are reported — a reverted call now genuinely shows <code>status: 0x0</code>, not a false &quot;Confirmed.&quot;</p>
+<p><strong>Option B — Scripted read/write (RPC only, no Console needed)</strong>, equivalent to the Console&#39;s Call tab above:</p>
+<p>Remix Studio&#39;s <strong>Deployed Contracts</strong> panel calls functions from your contract&#39;s ABI the same way — reads via <code>eth_call</code>, writes via a signed <code>eth_sendRawTransaction</code> with MetaMask prompting for each one. See §2&#39;s &quot;Remix Studio&quot; note.</p>
+<pre><code class="language-js">const contract = new Contract(contractAddress, abi, wallet);
+
+// read: eth_call, no gas, no nonce
+const current = await contract.get();
+
+// write: real transaction, nonce resolved automatically by ethers
+const tx = await contract.increment();
+const receipt = await tx.wait();
+console.log(&quot;status:&quot;, receipt.status); // 1 = success, 0 = reverted — real per-tx status
+</code></pre>
+<pre><code class="language-bash"># equivalent raw eth_call for a view function (function selector + encoded args as data)
+curl -s http://localhost:8645 -X POST -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x&lt;contract&gt;&quot;,&quot;data&quot;:&quot;0x6d4ce63c&quot;},&quot;latest&quot;]}&#39;
+</code></pre>
+<h2 id="6-debugging-tools-in-console-for-dapp-developers">6. Debugging Tools in Console for DApp Developers</h2>
+<p><strong>Without Console access</strong>, you still have direct RPC: <code>eth_getTransactionReceipt</code> (real status/gasUsed) and <code>eth_call</code> work from any script, no operator involvement needed. The Explorer-based tools below — Search, Compare across delegates, Divergence timeline — are <strong>Console-only</strong> and normally need your operator&#39;s help, since they reach delegate-internal state your RPC endpoint alone doesn&#39;t expose. If you suspect a consensus-level issue, hand your operator the transaction hash, shard ID, and block number rather than trying to run these yourself.</p>
+<ul>
+<li><strong>Real receipt status</strong> — <code>eth_getTransactionReceipt</code> reports the transaction&#39;s real execution <code>status</code> (success/revert) and real <code>gasUsed</code>, not a hardcoded success. Use this first when a transaction &quot;confirms&quot; but doesn&#39;t produce the state change you expected — a revert will now show as <code>status: 0x0</code> instead of looking identical to success.</li>
+<li><strong>Explorer → Search</strong> — look up any transaction or block by hash directly, without leaving the Console.</li>
+<li><strong>Explorer → Browse a block / block detail view</strong> — shows a block&#39;s full transaction list, and for a cross-shard transaction, a <strong>Cross-shard lookup</strong> panel.</li>
+<li><strong>Compare across delegates</strong> — if a contract call behaves inconsistently (works from one delegate&#39;s view, not another), this confirms whether the shard&#39;s own delegates have actually diverged, rather than a client-side issue.</li>
+<li><strong>Divergence timeline</strong> — once divergence is confirmed, pins down exactly which block it started at (walk-backward or binary search, §6 of the Operator Manual) — useful context to hand your operator when reporting an inconsistency.</li>
+<li><strong>Visible calldata preview</strong> — in the Call form (§5), the exact encoded calldata for the selected function is shown read-only before sending. This is the fastest way to catch an argument-encoding mistake, or the <code>receive()</code>-vs-<code>deposit()</code> empty-calldata trap (§3), before it costs a debugging session.</li>
+</ul>
+<p>When something looks wrong end-to-end and none of the above explains it, hand your operator: the transaction hash, the shard ID, and the block number — that&#39;s everything the Operator Manual&#39;s §6 forensic tools need to start from.</p>
+<p><strong>Example — pulling a real receipt to check why a call didn&#39;t do what you expected:</strong></p>
+<pre><code class="language-bash">curl -s http://localhost:8645 -X POST -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getTransactionReceipt&quot;,&quot;params&quot;:[&quot;0x&lt;tx hash&gt;&quot;]}&#39;
+# {&quot;status&quot;:&quot;0x0&quot;, &quot;gasUsed&quot;:&quot;0x...&quot;, ...}  &lt;- 0x0 means it reverted, even though it was mined
+</code></pre>
+<pre><code class="language-bash"># if a contract behaves inconsistently depending on which delegate answers, confirm divergence:
+curl -s http://localhost:8645 -X POST -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;xt_compareDelegates&quot;,&quot;params&quot;:[&lt;shard_id&gt;,&lt;block_number&gt;]}&#39;
+</code></pre>
+<h2 id="7-known-limitations-compatibility-notes">7. Known Limitations &amp; Compatibility Notes</h2>
+<ul>
+<li><strong>Legacy transactions only — no EIP-1559 (type-2)</strong>. Only real, legacy (type-0), EIP-155-signed RLP transactions are accepted. A type-2 transaction is correctly rejected with <code>&quot;invalid raw transaction: expected an RLP list (a legacy transaction), found a plain string&quot;</code>. Standard wallets don&#39;t normally hit this: <code>baseFeePerGas</code> is deliberately omitted from <code>eth_getBlockByNumber</code>/<code>eth_getBlockByHash</code>, which is the standard signal telling a wallet &quot;no EIP-1559 here,&quot; so MetaMask and similar wallets default to legacy automatically. It surfaces only if a wallet/SDK is configured to force type-2, or a transaction is hand-constructed. This is independent of XTblock&#39;s own, separately-built fee market (base-fee auto-adjustment) — what&#39;s missing is specifically the EIP-1559 transaction envelope, not fee-market functionality.</li>
+<li><strong>Events: partial support (0.10.30).</strong> <code>eth_getLogs</code> works (filter by <code>address</code>, <code>topics</code> with OR lists and null wildcards, <code>fromBlock</code>/<code>toBlock</code>), and receipts carry <code>logs</code>. Limits: <code>blockHash</code> filters and <code>eth_newFilter</code>/<code>eth_getFilterChanges</code>/subscriptions are not implemented; block numbers in a filter are SHARD block numbers (each shard has its own height, so <code>eth_blockNumber</code> — the coordinator height — is not a valid bound); retention is set by the operator (default 86,400 blocks, about a day, kept on disk so restarts keep them; blocks a delegate only synced have none); a query matching 10,000 or more logs on one shard returns an error, so narrow the block range or add an address/topic filter; no bloom. ethers <code>queryFilter</code> works with explicit shard block numbers; <code>contract.on(...)</code> does not (no filters/subscriptions): poll <code>eth_getLogs</code> instead.</li>
+<li><strong>No account/contract enumeration.</strong> There is no RPC (or Explorer feature) that lists all deployed contracts or all wallet addresses, per shard or chain-wide — not even a count. Every delegate&#39;s state is internally just an address-keyed map, but nothing exposes enumerating it. This gap comes from there being no indexing layer yet. Workarounds today: track contract deployments and unique addresses yourself by scanning blocks (<code>xt_getBlock</code>/<code>eth_getBlockByNumber</code>) client-side, or ask your operator whether a project-specific indexing solution exists. Flag this early in your design if a port of an existing Ethereum dApp assumes a block-explorer-style contract/wallet directory or long event history.</li>
+<li><strong>No cross-shard contract calls — a caller must be on the contract&#39;s own shard.</strong> A transaction only ever executes on the sender&#39;s home shard (<code>shard_for_address</code> computed on the sender, never the contract) — the receiving delegate rejects anything else at the mempool level. Since a contract&#39;s code only exists on its deployer&#39;s home shard (§4), a caller whose key hashes to a different shard can&#39;t actually invoke it: the call executes on the caller&#39;s own shard, where that address has no code, and silently behaves like a plain value transfer (calldata discarded) rather than erroring. The only cross-shard mechanism that exists is 2PC (Console → Tools → Cross-shard (2PC)): it commits one transaction <strong>per shard</strong> atomically — each leg can be a value transfer or a call to a contract on <em>that leg&#39;s own shard</em> (with ABI-built calldata), but no leg can call a contract on another shard or use another leg&#39;s result. Design any multi-shard dApp around this: every caller of a given contract needs a key whose address hashes to that contract&#39;s home shard.</li>
+<li><strong>Synthetic transactions removed.</strong> New chains set <code>synthetic_txs = false</code>, so blocks contain only real user transactions (empty blocks are normal). Older configs without the field keep the built-in per-block test transactions.</li>
+<li><strong>Gas pricing</strong>: <code>eth_gasPrice</code>/<code>eth_estimateGas</code> work as on any EVM chain, but there is no published minimum gas price or documented pricing policy in this manual — use <code>eth_gasPrice</code>&#39;s live value rather than hardcoding one, and confirm with your operator if you need a guaranteed floor for a demo.</li>
+<li><strong>Contract storage persists</strong> (SLOAD/SSTORE results survive blocks and restarts, and are carried by state-sync). Verified live with a counter contract and with TestVault <code>deposit()</code>/<code>myBalance()</code>.</li>
+<li><strong><code>mempool_cap</code> is a real throughput ceiling</strong>, shared between <code>SignedTransfer</code> and <code>RawEthTransfer</code> pools (each capped independently at the same configured value). A transaction submitted beyond the per-block cap is queued for the next block, not dropped — expect delay under burst load, not failure.</li>
+<li><strong><code>zero_gas_mode</code></strong>, if your operator has enabled it, mints balance directly to keep a sender topped up — an intentional, off-by-default convenience for enterprise/private deployments. Don&#39;t assume it&#39;s active; check with your operator, since gas-cost assumptions in your dApp&#39;s UX may otherwise be wrong.</li>
+<li><strong><code>eth_syncing</code> always returns <code>false</code></strong> — no partial-sync progress is exposed over RPC; don&#39;t build UX that depends on reading sync progress this way.</li>
+</ul>
+<p><strong>Example — what a rejected EIP-1559 submission actually looks like, and how to confirm the chain is legacy-only before debugging further:</strong></p>
+<pre><code class="language-bash"># a type-2 (EIP-1559) raw tx submitted via eth_sendRawTransaction:
+# {&quot;error&quot;:{&quot;message&quot;:&quot;invalid raw transaction: expected an RLP list (a legacy transaction), found a plain string&quot;}}
+
+# confirm the chain signals legacy-only (no baseFeePerGas in a block response):
+curl -s http://localhost:8645 -X POST -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getBlockByNumber&quot;,&quot;params&quot;:[&quot;latest&quot;,false]}&#39;
+# no &quot;baseFeePerGas&quot; field -&gt; standard wallets already default to legacy, no extra config needed
+</code></pre>
+<h2 id="8-cross-shard-transactions-2pc-what-they-do-and-do-not-do">8. Cross-shard transactions (2PC) — what they do and do not do</h2>
+<p>A 2PC transaction commits <strong>one transaction per shard, atomically</strong>. Each leg is a normal transaction signed by a key whose home shard is that leg&#39;s shard; a leg can be a plain transfer or a contract call to a contract that lives on that same shard. 2PC does <strong>not</strong> let one leg call a contract on another shard, and it does not move funds between shards.</p>
+<p>Phases: (1) the coordinator sends <strong>Prepare</strong> to every shard; (2) each shard tentatively executes its leg, locks the sender and the recipient/contract address, and votes <strong>Ready</strong> or <strong>Abort</strong>; (3) the coordinator sends <strong>Commit</strong> only if every shard voted Ready, otherwise <strong>Abort</strong>, and the decision is written to the coordinator chain as a 2PC record. If any leg fails in Prepare (revert, insufficient balance, wrong nonce, locked address) the whole transaction aborts and no balance changes.</p>
+<p>Known limits (see KNOWN_ISSUES_AND_ROADMAP.md): the decision is sent once with no retry or acknowledgement, and a prepared shard drops its leg after <code>two_pc_lock_expiry_secs</code> (30 s) if no decision arrives. In that rare case one shard can commit while the other drops its leg. A 3-timeouts-per-60-s rate limit applies per address.</p>
+<p>Practical rules: a transaction ID must be unique per attempt (the Console generates a fresh one after every run); for a contract-call leg the sender key must be on the contract&#39;s shard (the 2PC form checks this and checks <code>eth_getCode</code>); amounts are real XTT and the sender is debited, no top-up exists unless the operator wrongly enabled <code>zero_gas_mode</code>.</p>
+<h2 id="9-building-on-xtblock-without-running-a-delegate">9. Building on XTblock without running a delegate</h2>
+<p><strong>Recommended workflow:</strong> deploy contracts ONLY with the portal (or the Console), because they handle the shard rule (the contract address must hash to your own shard) by sending the 0-value self-transfers for you. Use MetaMask/ethers for plain transfers and for calling contracts that are already deployed.</p>
+<p><strong>Developer portal</strong> (xtgw 0.10.29+): open <code>http://&lt;xtgw-host&gt;:&lt;rpc-port&gt;/</code>. Tabs: <em>Wallet</em> (create/import an EVM key, balance, nonce, shard, send XTT), <em>Deploy</em> (bytecode + ABI, constructor fields, automatic shard alignment, receipt and code verification), <em>Call</em> (ABI-driven reads via <code>eth_call</code> and writes), <em>Explorer</em> (latest heights, recent blocks per shard, block by number, transaction, address, 2PC record lookup), <em>Faucet</em>. The private key stays in the browser; it is stored only if you tick &quot;remember&quot;. Gateway extras: <code>xt_chainInfo</code> (chain name, chain id, shard count, reachable shards, faucet info) and <code>xt_faucetDrip(address)</code>.</p>
+<p><strong>Operator setup for the faucet</strong> (testnet only): in xtgw.toml, inside the <code>[[chains]]</code> entry, set <code>faucet_private_key_hex</code> (a dedicated EVM key; stored in plain text), optionally <code>faucet_drip_wei</code> (default 1 XTT) and <code>faucet_cooldown_secs</code> (default 3600, per address). Fund that account on its own shard. Network-map-driven gateways (no <code>[[chains]]</code> entry) put the same three <code>faucet_*</code> lines at the TOP LEVEL of xtgw.toml, before the first <code>[table]</code>/<code>[[table]]</code> header. If a claim mines but the balance does not rise, the faucet account is empty.</p>
+<p><strong>Console Developer mode</strong>: the <strong>Developer mode</strong> button in the top bar hides instances, New chain, Connect, Tools and Add operator, and shows the portal for the gateway address you type, plus Keys, Shard lookup and Manuals. Click it again to return to node management. Only the gateway address is remembered. <strong>Open in browser</strong> opens the same portal in your default browser. The portal always talks to the gateway that served it (its address bar), so it has no gateway field of its own. Right-click is disabled inside the Console&#39;s portal view (it could reload the Console window); use the keyboard for copy and paste there, or open the portal in your browser.</p>
+<p>A developer only needs an <strong>xtgw RPC URL</strong> (and the chain&#39;s <code>eth_chain_id</code>). Everything below goes through xtgw:</p>
+<ul>
+<li>Wallet/dApp tooling that signs legacy (type-0) EIP-155 transactions (MetaMask, ethers, web3) can send via <code>eth_sendRawTransaction</code>.</li>
+<li>The Console&#39;s Contract deploy/call and Faucet sign locally and send through xtgw; no delegate selection and no delegate access is required.</li>
+<li>Sharding rules still apply: your account lives on <code>shard_for_address(address)</code>; a contract&#39;s code lives on its deployer&#39;s shard; xtgw rejects a deployment whose address would hash to another shard and tells you which nonce to use (the Console advances the nonce with 0-value self-transfers automatically).</li>
+<li><code>eth_estimateGas</code> is a conservative heuristic (21000 for a plain transfer, about 200,000 + 400/byte for a deployment, 300,000 for a call with calldata), not a simulation. Revert reasons are not returned.</li>
+</ul>
+</main></div>
+<footer class="site-footer"><div class="wrap"><span>© 2026 XTblock</span><span>XTblock XTB-Testnet-003 · xtcn 0.10.32 · Console 0.8.77</span></div></footer>
+<script src="assets/site.js"></script></body></html>

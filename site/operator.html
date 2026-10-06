@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Operator manual · XTblock</title><meta name="description" content="Operator manual for XTblock">
+<link rel="icon" href="data:,"><link rel="stylesheet" href="assets/style.css"></head>
+<body>
+<header class="site-header"><div class="wrap">
+  <a class="brand" href="index.html"><span class="logo">XT</span><span>XTblock</span></a>
+  <nav>
+    <a href="index.html#downloads" class="">Download</a>
+    <a href="operator.html" class="on">Operator manual</a>
+    <a href="developer.html" class="">Developer manual</a>
+    <a href="release-notes.html" class="">Release notes</a>
+    <a href="https://github.com/XTblock/xtblock" rel="noopener">GitHub</a>
+    <button id="theme" aria-label="Toggle theme" title="Toggle theme">◐</button>
+  </nav>
+</div></header><div class="wrap doc"><aside class="toc"><input id="tocFilter" placeholder="Filter sections…" aria-label="Filter sections"><a class="d2" href="#quick-start-single-machine-test-chain">Quick Start (single-machine test chain)</a><a class="d2" href="#1-introduction-glossary">1. Introduction &amp; Glossary</a><a class="d2" href="#2-system-requirements-installation">2. System Requirements &amp; Installation</a><a class="d2" href="#3-network-identity-setup">3. Network &amp; Identity Setup</a><a class="d2" href="#4-node-configuration-reference">4. Node Configuration Reference</a><a class="d2" href="#5-launching-and-operating-the-chain-via-console">5. Launching and Operating the Chain via Console</a><a class="d2" href="#6-monitoring-forensics-in-console">6. Monitoring &amp; Forensics in Console</a><a class="d2" href="#7-troubleshooting">7. Troubleshooting</a></aside><main class="prose"><h1 id="xtblock-operator-manual">XTblock Operator Manual</h1>
+<p>2026-10-06 — covers xtcn 0.10.32 / Console 0.8.77</p>
+<h2 id="quick-start-single-machine-test-chain">Quick Start (single-machine test chain)</h2>
+<p>Fastest path to one running chain, to try the product before reading the rest of this manual. Every delegate/gateway you create here is a standalone <strong>solo instance</strong> (<code>own_index`` = ``0</code>, <code>delegate_count = 1</code>) with its own auto-generated TLS identity — no genesis manifest, no Key generator, no separate identity step required. Not fault-tolerant (no real quorum with one delegate) — for local testing only, not production.</p>
+<ol>
+<li>Install the Console app and place the <code>xtcn</code>/<code>xtgw</code> binaries where Console expects them (§2).</li>
+<li>Console → <strong>New instance</strong> → pick the <strong>Delegate (xtcn)</strong> preset → Next.</li>
+<li>Leave the xtcn role as <code>shard</code> (a label only, §4) — no manifest, no identity file, no port to fill in; Console generates a fresh self-signed identity and a complete default <code>node.toml</code> for you.</li>
+<li>Name the instance, leave <strong>Start instance immediately after creation</strong> checked, and finish the wizard.</li>
+<li>Repeat steps 2–4 once more, picking the <strong>Gateway (xtgw)</strong> preset instead, to get an <code>xtgw</code> you can send RPC calls to.</li>
+<li>Confirm it&#39;s alive via Explorer → <strong>Known-chain health</strong>, or the RPC example in §1.</li>
+</ol>
+<p>This is the whole flow — a bare solo instance needs no <code>genesis_manifest_path</code> (it&#39;s optional and unset by default) and boots on its own isolated single-delegate chain. To link several solo instances into one real multi-delegate chain group, or to create a real, named, signed chain shared across operators, see §3.</p>
+<h2 id="1-introduction-glossary">1. Introduction &amp; Glossary</h2>
+<p>XTblock is a proprietary, sharded EVM blockchain. Transaction execution and consensus are split across independent <strong>shard groups</strong>, coordinated by a separate <strong>coordinator chain</strong>, so throughput scales by adding shards rather than by making one chain faster. This manual covers setup, configuration, and day-to-day operation through the XTblock Console desktop app.</p>
+<p><strong>Glossary</strong></p>
+<ul>
+<li><strong>Node</strong> — a single running process, either <code>xtcn</code> (a consensus participant: a shard delegate or a coordinator replica) or <code>xtgw</code> (a stateless RPC gateway with no vote in consensus).</li>
+<li><strong>Delegate</strong> — one <code>xtcn</code> instance participating in consensus for a specific shard. A shard normally runs several delegates (<code>delegate_count</code>) that must agree (reach quorum) on every block.</li>
+<li><strong>Shard</strong> — an independent partition of the chain&#39;s state and transaction load, identified by <code>shard_id</code>. Each shard runs its own consensus among its own delegates.</li>
+<li><strong>Coordinator chain</strong> — a separate consensus group (conventionally <code>shard_id = 999</code>) that does not hold shard state itself. It sequences cross-shard work: two-phase commit (2PC) transactions, checkpoints, and shard registration.</li>
+<li><strong>Quorum</strong> — the minimum number of delegates in a shard (or coordinator replicas) that must agree on a block before it is considered final.</li>
+<li><strong>Genesis manifest</strong> — the signed, original file that defines a chain at creation: chain ID, shard count, delegate roster, initial token allocations, and fee/gas parameters. Created once, when the chain is founded.</li>
+<li><strong>Network map</strong> — a signed, updatable file (distinct from the genesis manifest) that publishes the current set of trusted delegate/coordinator/gateway addresses and TLS public keys, so nodes and <code>xtgw</code> can discover and trust each other without manual re-configuration every time the roster changes.</li>
+<li><strong>xtgw (gateway)</strong> — the RPC-facing binary. Exposes <code>eth_*</code>/<code>xt_*</code> JSON-RPC, routes requests to the right shard&#39;s delegates, and holds no consensus state of its own.</li>
+<li><strong>xtops / xtops-agent</strong> — a lightweight agent process that runs on a remote host so the Console can manage that host&#39;s local <code>xtcn</code>/<code>xtgw</code> instances from elsewhere (start/stop, live status), without the Console itself running there. Connected from Console via §5.4.</li>
+<li><strong>Mempool</strong> — the pool of transactions a delegate has accepted but not yet included in a block. Bounded per block by <code>mempool_cap</code> (§4).</li>
+<li><strong>2PC (two-phase commit)</strong> — the protocol the coordinator chain uses to atomically commit a transaction that touches more than one shard.</li>
+<li><strong>Checkpoint</strong> — a shard&#39;s periodic, signed summary of its own state, submitted to the coordinator chain so cross-shard work can reference a shard&#39;s state without querying every delegate directly.</li>
+</ul>
+<p><strong>Example — confirm a gateway is live and read its chain ID:</strong></p>
+<pre><code class="language-bash">curl -s http://localhost:8645 -X POST -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_chainId&quot;,&quot;params&quot;:[]}&#39;
+# {&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;result&quot;:&quot;0x...&quot;}
+</code></pre>
+<h2 id="2-system-requirements-installation">2. System Requirements &amp; Installation</h2>
+<p><strong>Minimum hardware floor per host (§28)</strong></p>
+<table>
+<thead>
+<tr>
+<th>Resource</th>
+<th>Minimum</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>CPU</td>
+<td>8 cores</td>
+</tr>
+<tr>
+<td>RAM</td>
+<td>32 GB</td>
+</tr>
+<tr>
+<td>Disk</td>
+<td>500 GB</td>
+</tr>
+<tr>
+<td>Network</td>
+<td>1.0 Gbps link speed</td>
+</tr>
+</tbody></table>
+<p>A host below this floor can still run in dev/test (the Console reports &quot;BELOW FLOOR — proceeding anyway, dev/test context&quot; rather than refusing), but throughput observed on it is a conservative floor, not the number to plan capacity around — see §4 on <code>mempool_cap</code> for how to size a rate limit from a below-floor test.</p>
+<p><strong>Platform</strong>: the Console builds for Windows, macOS, and Linux (Tauri, <code>targets: all</code>), but is primarily developed and tested on Windows — config-path examples throughout this manual use Windows-style paths (<code>C:\...</code>). macOS/Linux builds are expected to work but are less exercised; note any platform-specific issue you hit to your operator team.</p>
+<p><strong>Time sync</strong>: every host needs its OS clock kept in sync via standard NTP (chrony or systemd-timesyncd on Linux, w32time on Windows) — xtcn has no built-in clock-sync or skew-tolerance of its own. Consensus slot timing (<code>block_time_ms</code>) is computed purely from each host&#39;s local wall clock, so a host whose clock has drifted meaningfully can fall out of step with its peers (missed turns, rejected votes) with no warning from xtcn itself.</p>
+<p><strong>Binaries</strong></p>
+<ul>
+<li><code>xtcn</code> — the consensus node binary. One process per shard delegate or coordinator replica.</li>
+<li><code>xtgw</code> — the RPC gateway binary. One or more per chain, stateless, can be scaled independently of consensus.</li>
+<li><strong>XTblock Console</strong> — the Tauri + React desktop app used to install, configure, launch, and monitor <code>xtcn</code>/<code>xtgw</code> instances, and to deploy/call contracts, without hand-editing config files or using a separate CLI for routine operations.</li>
+</ul>
+<p><strong>Installation steps</strong></p>
+<ol>
+<li>Install the XTblock Console desktop app on the operator workstation/server.</li>
+<li>Place the <code>xtcn.exe</code> and <code>xtgw.exe</code> binaries where the Console&#39;s &quot;New instance&quot; flow expects them (the Console reads each instance&#39;s own <code>node.toml</code> path directly — no separate registration step).</li>
+<li>Confirm the host meets or exceeds the hardware floor above before provisioning a production or demo chain.</li>
+<li>Proceed to §3 (Network &amp; Identity Setup) to create or join a chain.</li>
+</ol>
+<p><strong>Example — expected instance folder layout, and starting a node manually (Console does this for you, but the equivalent command line is):</strong></p>
+<pre><code class="language-text">instances/
+  shard0-delegate0/
+    node.toml
+    tls_cert.pem
+    tls_key.pem
+    ca_cert.pem
+  coord-replica0/
+    node.toml
+    ...
+</code></pre>
+<pre><code class="language-bash"># from the folder containing the binary and node.toml
+./xtcn --config node.toml
+./xtgw --config node.toml
+</code></pre>
+<h2 id="3-network-identity-setup">3. Network &amp; Identity Setup</h2>
+<p>A <strong>solo instance</strong> created via Quick Start needs none of this — it runs its own isolated single-delegate chain out of the box. This section covers the two real ways to go beyond that: wiring multiple solo instances you control into one real multi-delegate group (§3.0), and creating a real, named, signed chain — with its own genesis manifest and network map — for production or for sharing across operators (§3.1–§3.4).</p>
+<p><strong>3.0 Wiring multiple solo instances into one chain group (same operator, local machines)</strong></p>
+<p>Every instance Console creates is solo by design (§5.1) — there is no multi-delegate option in the New instance wizard itself. To make several solo instances act as one real multi-delegate chain:</p>
+<ol>
+<li>Create one solo instance per delegate you want (§5.1).</li>
+<li>From any one instance&#39;s panel, click <strong>Chain group</strong> — it lists every other real, locally-known delegate and gives you a ready-to-paste <code>[[delegates]]</code> block for each, without risking a duplicate index.</li>
+<li>Paste the resulting <code>[[delegates]]</code> blocks into every instance&#39;s own <code>node.toml</code> (§5.2&#39;s raw-TOML editor), so every delegate agrees on the same roster — required for leader rotation and quorum to mean anything.</li>
+<li>Restart each instance (§5.7) for the new roster to take effect.</li>
+</ol>
+<p>This is the lightweight, same-operator path. For a delegate run by a <strong>different</strong> operator/organization — who needs to generate their own identity and hand you a bundle rather than you wiring them directly — use the Shared chain wizard instead (§3.2).</p>
+<p><strong>3.1 Creating a new chain (genesis manifest)</strong></p>
+<p>Console: <strong>New chain — genesis manifest</strong>.</p>
+<ol>
+<li>Fill in <strong>Chain ID</strong> (e.g. <code>xtb-testnet-1</code>), <strong>Symbol</strong>, <strong>n_shard</strong> (number of shard groups), and <strong>delegate_count</strong> (delegates per shard/coordinator). Token decimals and name are fixed.</li>
+<li>Set <strong>Total initial supply</strong> and review the network-declared gas/fee defaults (editable before signing).</li>
+<li>Optionally load an existing manifest as a starting point (pre-fills settings/delegates; Chain ID is left blank so you don&#39;t overwrite the source file).</li>
+<li>Optionally switch to raw TOML edit mode for direct control over the generated file before signing.</li>
+<li>Sign with a real Ed25519 private key. <strong>Testnet-tier signing only</strong> — the mainnet HSM + M-of-N multisig custody path is not implemented in the Console. Nothing is stored or reused between chains.</li>
+<li>The Console writes the signed genesis manifest file and reports its path — copy this into <code>genesis_manifest_path</code> on every instance that will join this chain.</li>
+</ol>
+<p><strong>3.2 Generating a node identity</strong></p>
+<p>Console: <strong>Key generator</strong> (for a standalone identity) or the <strong>Shared chain — independent co-delegates</strong> wizard (for an operator joining an existing chain they don&#39;t control end-to-end):</p>
+<ol>
+<li><strong>Generate identity</strong> — creates a self-signed TLS identity for a given host, written to an output directory.</li>
+<li><strong>Export my bundle</strong> — packages this delegate&#39;s index, public key, address, and identity cert path into a bundle to hand to whoever maintains the network map/genesis manifest for this chain.</li>
+<li><strong>Build my config</strong> — assembles this instance&#39;s own <code>node.toml</code> from the chain ID and the identity just generated.</li>
+</ol>
+<p><strong>3.3 Trust model</strong></p>
+<ul>
+<li><strong>Network-map-driven trust (preferred)</strong>: set <code>genesis_authority_pubkey_hex</code> plus <code>network_map_path</code> on every instance. Trust and routing then update automatically as the network map is re-signed and republished — no manual cert export/import/pin step per peer.</li>
+<li><strong>Pinned-cert fallback</strong>: if no genesis authority/network map is configured yet, instances fall back to the older CA-based/pinned-certificate trust model (import a peer&#39;s pinned cert bundle manually via the Console).</li>
+<li>The Console&#39;s config panel shows, per instance, which trust mode is active and why — check this after any change to <code>genesis_authority_pubkey_hex</code> or <code>network_map_path</code>.</li>
+</ul>
+<p><strong>3.4 Publishing network map updates</strong></p>
+<p>When the delegate/coordinator/gateway roster changes, re-sign and republish the network map from the Console (same signing key model as §3.1) so every node picks up the change without hand-editing peer lists.</p>
+<p><strong>Example — minimal node.toml identity/trust block, as generated by §3.1–3.2 above:</strong></p>
+<pre><code class="language-toml">genesis_manifest_path = &quot;C:\\xtblock\\genesis\\xtb-testnet-1.manifest.json&quot;
+network_map_path = &quot;C:\\xtblock\\network\\xtb-testnet-1.network-map.json&quot;
+genesis_authority_pubkey_hex = &quot;7c3f...&quot;  # same value on every instance in this chain
+
+tls_cert_path = &quot;C:\\xtblock\\identity\\shard0-delegate0\\tls_cert.pem&quot;
+tls_key_path = &quot;C:\\xtblock\\identity\\shard0-delegate0\\tls_key.pem&quot;
+tls_ca_cert_path = &quot;C:\\xtblock\\identity\\shard0-delegate0\\ca_cert.pem&quot;
+</code></pre>
+<p>Check which trust mode is active from the panel, or by confirming both <code>genesis_authority_pubkey_hex</code> and <code>network_map_path</code> are non-empty — either alone falls back to pinned-cert trust.</p>
+<p><strong>3.5 Key custody</strong></p>
+<ul>
+<li>Every private key entered in Console (chain-signing key in §3.1, delegate identity in §3.2) is used in-memory only — nothing is written to disk or reused between operations.</li>
+<li>The manual signing flow in §3.1 is explicitly <strong>testnet-tier</strong>: fine for a demo or internal chain, not appropriate for a chain holding real value — there is no HSM or M-of-N multisig custody path built into Console today.</li>
+<li>Never paste a production signing key into a shared or screen-shared Console session. Treat every key field the same as a password field, even where the UI doesn&#39;t mask it.</li>
+<li>Losing the chain-signing key used in §3.1 doesn&#39;t stop the chain running, but does stop you from signing a new genesis manifest or network map for it — store it with the same care as any root credential.</li>
+</ul>
+<p><strong>3.6 Multi-machine addressing</strong></p>
+<ul>
+<li>Every delegate&#39;s <code>address</code> in its peers&#39; <code>[[delegates]]</code> list (§4) must be that delegate&#39;s real, externally-reachable <code>host:port</code> — never <code>127.0.0.1</code> — the moment any two instances in the chain group run on different machines. xtcn derives its own reply address for request/reply traffic (status queries, proofs, 2PC checks, state sync, etc.) from this same <code>delegates</code> entry (as of v0.10.0), so a wrong or loopback-only address here breaks replies silently: the request appears to send fine, but the reply never arrives.</li>
+<li><code>xtgw</code> has no <code>[[delegates]]</code> list of its own to infer this from — set <code>own_host</code> in its own config file to its real, externally-reachable host whenever it talks to a delegate/coordinator on a different machine. Leaving <code>own_host</code> unset falls back to <code>127.0.0.1</code> and logs a startup warning.</li>
+</ul>
+<h2 id="4-node-configuration-reference">4. Node Configuration Reference</h2>
+<p>All fields live in each instance&#39;s <code>node.toml</code>. The Console&#39;s raw-TOML editor validates syntax before restart using the same parser <code>xtcn</code>/<code>xtgw</code> use, so config mistakes surface before a crash rather than after.</p>
+<p><strong>Core identity &amp; topology</strong></p>
+<ul>
+<li><code>block_time_ms</code> (default 1000) — target time between blocks, in milliseconds. Every other timing field below is sized relative to this.</li>
+<li><code>own_port</code> — this instance&#39;s own listening port.</li>
+<li><code>delegate_count</code> — number of delegates this shard (or coordinator) expects, from the genesis manifest.</li>
+<li><code>n_shard</code> (default from genesis) — total shard groups in this chain.</li>
+</ul>
+<p><strong>Chain identity &amp; test traffic</strong></p>
+<ul>
+<li><code>eth_chain_id</code> (optional) — EIP-155 chain id. If unset, xtcn 0.10.20+ derives it from the network chain, matching <code>xtgw</code>. It must be identical on every delegate and gateway; a mismatch silently drops wallet transactions.</li>
+<li><code>synthetic_txs</code> (default <code>true</code> when absent; the Console writes <code>false</code> for new instances) — when false, blocks carry no built-in filler transactions. Set it the same on every delegate of the chain: it is checked in block verification, so mixed settings cause divergence.</li>
+<li><code>auto_restart</code> — read live by <code>xtops-agent</code>; required for fork auto-recovery (below).</li>
+</ul>
+<p><strong>Throughput &amp; mempool</strong></p>
+<ul>
+<li><code>mempool_cap</code> (default 50, as of v0.9.0) — max transactions pulled into a single block, per transaction source. <code>SignedTransfer</code> and <code>RawEthTransfer</code> each get an independent budget of this size, so a block can carry up to <code>2 × mempool_cap</code> total. Not wired to gas limits or consensus rules — raising it further is safe only as far as it&#39;s been tested; see §6 for how this project validated 50 from a real load test, which is why it&#39;s the compiled default now rather than an opt-in override. Transactions beyond the cap wait for the next block rather than being dropped.</li>
+<li><code>event_log_retention_blocks</code> (default 86,400, about a day at 1 s blocks) and <code>event_log_max_entries</code> (default 500,000 logs, up to roughly 150 MB of memory) — how much contract-event history <code>eth_getLogs</code> keeps per delegate (xtcn 0.10.32+). The oldest blocks are dropped first. Raise both for a longer history; the history is also stored in <code>event-logs-&lt;chain&gt;-&lt;index&gt;.bin</code>, so disk use and startup time grow with it. Set the same values on every delegate of a shard.</li>
+</ul>
+<p><strong>Consensus timing</strong></p>
+<ul>
+<li><code>miss_timeout_ms</code> (default 3000) — how long a delegate waits for an on-time proposal before treating the round as missed.</li>
+<li><code>vote_collection_window_ms</code> — a brief hold (comfortably under <code>miss_timeout_ms</code>) before voting for a skip-proposal, to give a genuine on-time (or less-escalated) proposal a chance to arrive first. Adds no latency to the healthy path.</li>
+</ul>
+<p><strong>2PC (cross-shard transactions)</strong></p>
+<ul>
+<li><code>two_pc_attempt_timeout_ms</code> — per-attempt timeout for a 2PC round.</li>
+<li><code>two_pc_lock_expiry_secs</code> — how long a 2PC address lock is held before it expires.</li>
+<li><code>two_pc_griefing_threshold</code> / <code>two_pc_griefing_window_secs</code> — rate-limits an address that repeatedly triggers likely-timeout lock releases, to prevent griefing.</li>
+<li><code>two_pc_backup_promotion_secs</code> — how long before a backup coordinator replica is promoted if the primary is unresponsive.</li>
+<li><code>checkpoint_interval</code> (default set by chain) — how often a shard submits a checkpoint to the coordinator chain.</li>
+</ul>
+<p><strong>Rate limits</strong></p>
+<ul>
+<li><code>proof_rate_limit_max</code> (default 20) / <code>proof_rate_limit_window_secs</code> (default 10) — throttles state/transaction proof generation (CPU-expensive) to <code>proof_rate_limit_max</code> requests per <code>proof_rate_limit_window_secs</code> — 2 requests/sec at defaults. Shared between <code>ProofRequest</code> and <code>TxProofRequest</code>.</li>
+</ul>
+<p><strong>Fee &amp; gas (optional, off by default)</strong></p>
+<ul>
+<li><strong>Gas/fee policy in the genesis form:</strong> choose <strong>No gas fees</strong> (writes <code>zero_gas_mode = false</code>, <code>fee_market_enabled = false</code> into the manifest) or <strong>Fee market</strong> (also needs a treasury address). Either way the choice is pinned in the manifest. Zero-gas mode is no longer offered in the Console.</li>
+<li><code>zero_gas_mode</code> / <code>fee_market_enabled</code> / <code>treasury_address_hex</code> must equal what the signed genesis manifest declares. From xtcn 0.10.24 every start checks this and refuses to run on a mismatch (earlier versions checked only on a fresh start, so a restarted node could run with a different value unnoticed).</li>
+<li><code>zero_gas_stipend</code> — if <code>zero_gas_mode</code> is enabled, tops a sender&#39;s balance up to this stipend directly whenever it falls below it, every block. <strong>Unbounded, untracked minting while enabled</strong> — a deliberate, optional convenience for enterprise/private-chain deployments that want gas-free transactions for known participants, never enabled by default, and not intended for a public or token-scarce chain.</li>
+<li><code>gas_relay_stipend</code> — separate relay-stipend mechanism; see the fee-market spec for scope.</li>
+<li><code>block_stm_enabled</code> — enables the Block-STM-style scheduler fallback for transactions with non-empty calldata (contract calls/deployments), which run solo rather than risk an unseen storage conflict from a transitive contract call.</li>
+</ul>
+<p><strong>Identity &amp; trust</strong> (see §3 for the full setup flow)</p>
+<ul>
+<li><code>genesis_manifest_path</code>, <code>network_map_path</code>, <code>genesis_authority_pubkey_hex</code> — chain identity and trust-model inputs.</li>
+<li><code>tls_cert_path</code> / <code>tls_key_path</code> / <code>tls_ca_cert_path</code> — this instance&#39;s own TLS identity.</li>
+</ul>
+<p><strong>xtgw: chain identity (<code>eth_chain_id</code>) and RPC serving (<code>eth_rpc_enabled</code>)</strong></p>
+<p>These two fields only matter for <code>xtgw</code>, and only if you want to override the automatic default. For a normal setup — including a bare, network-map-driven <code>xtgw</code> created via Console&#39;s simplified New Instance flow (§5.1), with <strong>no manual <code>[[chains]]</code> block at all</strong> — both are handled for you automatically:</p>
+<ul>
+<li><strong><code>chain_id</code></strong> — on a bare <code>xtgw</code>, this is never a literal field you set. At startup, <code>xtgw</code> derives it itself from whichever of <code>network_map_path</code>/<code>genesis_manifest_path</code> is configured (network map preferred, manifest as fallback) — the same files §3.3/§3.4 already have you point at for trust. Console&#39;s instance detail panel shows the resolved value directly.</li>
+<li><strong><code>eth_chain_id</code></strong> — the numeric chain ID served over <code>eth_chainId</code>/wallet configuration (Developer Manual §2). Derived deterministically from <code>chain_id</code> (a <code>blake3</code> hash of the string, truncated to 4 bytes) — the same <code>chain_id</code> string always produces the same <code>eth_chain_id</code>, with no field to set. Console displays this alongside <code>chain_id</code> on the instance detail panel. To override it with a specific number instead (e.g. to match an existing wallet&#39;s saved network entry), add a manual <code>[[chains]]</code> block with an explicit <code>eth_chain_id = &lt;value&gt;</code> — only needed for that one case.</li>
+<li><strong><code>eth_rpc_enabled</code></strong> (default <code>true</code>) — gates whether a given chain is actually served over the <code>eth_*</code> JSON-RPC surface. One <code>xtgw</code> process/port serves at most one chain&#39;s <code>eth_*</code> RPC at a time. This only becomes a real decision if you hand-write <strong>more than one</strong> <code>[[chains]]</code> entry on the same <code>xtgw</code> (unusual — one <code>xtgw</code> routing <code>eth_*</code> for two chains at once): the first entry with <code>eth_rpc_enabled = true</code> wins, and a startup warning logs for the rest. A single bare or single-chain <code>xtgw</code> never needs this field touched.</li>
+</ul>
+<p>In short: don&#39;t add a <code>[[chains]]</code> block just to get <code>eth_chain_id</code> or <code>eth_rpc_enabled</code> working — both already work without one. Only add one to override a value by hand.</p>
+<p><strong>Example — a shard delegate&#39;s <code>node.toml</code>, with the throughput/timing fields from this section set explicitly (rather than left at default):</strong></p>
+<pre><code class="language-toml">block_time_ms = 1000
+own_port = 7601
+delegate_count = 3
+
+mempool_cap = 50            # the compiled default as of v0.9.0 — see this manual&#39;s mempool_cap decision log
+miss_timeout_ms = 3000
+vote_collection_window_ms = 250
+
+proof_rate_limit_max = 20
+proof_rate_limit_window_secs = 10
+
+two_pc_attempt_timeout_ms = 3000
+two_pc_lock_expiry_secs = 30
+two_pc_griefing_threshold = 5
+two_pc_griefing_window_secs = 60
+two_pc_backup_promotion_secs = 15
+checkpoint_interval = 100
+</code></pre>
+<h2 id="5-launching-and-operating-the-chain-via-console">5. Launching and Operating the Chain via Console</h2>
+<p><strong>5.1 Starting an instance</strong></p>
+<ol>
+<li>Console → <strong>New instance</strong>. Pick a preset — <strong>Delegate (xtcn)</strong> or <strong>Gateway (xtgw)</strong> — or toggle both workers for a combined instance.</li>
+<li>Configure that worker: for <strong>xtcn</strong>, pick <code>shard</code> or <code>coordinator</code> (a label only, §4) — port is auto-assigned. For <strong>xtgw</strong>, optionally set a port and a coordinator to route to (both can be left blank and wired up later, e.g. via &quot;Import a coordinator&#39;s pinned cert&quot;).</li>
+<li>Name the instance, choose whether to auto-start and auto-restart-on-crash, and finish.</li>
+<li>Console spawns the binary with a freshly auto-generated TLS identity (<code>xtcn --gen-certs</code> under the hood) and a complete default <code>node.toml</code>. Every instance created this way starts as its own solo chain (<code>own_index = 0</code>, <code>delegate_count = 1</code>) — §3.0 covers joining several into one real group.</li>
+</ol>
+<p><strong>5.2 Day-2 config changes</strong></p>
+<ul>
+<li>Edit a running instance&#39;s config from its panel: structured fields, or <strong>Edit the whole file as raw text</strong> for full control (validated against the real TOML parser before restart, §4).</li>
+<li><strong>Edit cross-shard/coordinator fields</strong> and <strong>Remove manual <code>[[remote_shards]] entries</code></strong> are both exposed directly — the latter is safe once network-map-driven routing (§3.3) is active, since it already covers the same ground automatically.</li>
+<li>Changes to <code>node.toml</code> require a restart of that instance to take effect.</li>
+</ul>
+<p><strong>5.3 Adding an operator / access control</strong></p>
+<p>Console supports multiple named operators on one installation (<strong>Add a new operator</strong>, <strong>Change password</strong>) — use this to hand day-2 operation to a second person without sharing one login.</p>
+<p><strong>5.4 Remote hosts (xtops)</strong></p>
+<p>The Console only manages instances on its own local machine directly. To operate a remote host, connect to that host&#39;s <code>xtops-agent</code> (<strong>Live xtops connection</strong>): point the Console at the folder containing that agent&#39;s own PKI (<code>ca-cert.pem</code>/<code>cert.pem</code>/<code>client-cert.pem</code>/<code>client-key.pem</code>), the same folder <code>xtops.exe</code>/<code>agent.exe</code> lives in. Once connected, the panel auto-refreshes (polls every 3s) and shows that host&#39;s live status.</p>
+<p><strong>5.5 Shutting down</strong></p>
+<p>Stop an instance from its own panel. For a full chain shutdown, stop all delegates/coordinators before gateways, so no gateway is left routing to an already-stopped delegate.</p>
+<p><strong>Example — startup/shutdown order for a full chain (2 shards + coordinator + gateway), command-line equivalent of what Console&#39;s New instance buttons do:</strong></p>
+<pre><code class="language-bash"># start every coordinator replica first
+./xtcn --config coord-replica0/node.toml &amp;
+./xtcn --config coord-replica1/node.toml &amp;
+./xtcn --config coord-replica2/node.toml &amp;
+
+# then every shard delegate
+./xtcn --config shard0-delegate0/node.toml &amp;
+./xtcn --config shard0-delegate1/node.toml &amp;
+./xtcn --config shard1-delegate0/node.toml &amp;
+
+# gateway last, once delegates are up
+./xtgw --config gateway0/node.toml &amp;
+
+# shutdown: reverse order — stop gateways, then shard delegates, then coordinators
+</code></pre>
+<p><strong>5.6 Confirming a new instance actually started</strong></p>
+<ul>
+<li>Open that instance&#39;s <strong>logs</strong> panel in Console (available from the instance&#39;s own window) — look for a real block being proposed/finalized, not just a &quot;process started&quot; line.</li>
+<li>Cross-check with Explorer → <strong>Known-chain health</strong> (§6) — it should show this shard/coordinator as healthy within a few block times.</li>
+<li>If nothing is happening: confirm <code>delegate_count</code> in this instance&#39;s <code>node.toml</code> matches how many delegates are actually running and reachable — a shard below quorum will sit idle, not error loudly.</li>
+</ul>
+<p><strong>5.7 Upgrading a running chain</strong></p>
+<ol>
+<li>Check whether the new build changed any wire format (message/RPC struct fields) — this project&#39;s own changelog notes it explicitly when it does (e.g. the receipt-status fix, §7). A wire-format change means every <code>xtcn</code>/<code>xtgw</code> instance must be rebuilt and restarted together — mixed old/new binaries will misbehave.</li>
+<li>Stop instances in the same order as a full shutdown (§5.5): gateways, then shard delegates, then coordinators.</li>
+<li>Replace the binaries for each instance.</li>
+<li>Restart in the same order as a fresh start (§5.1): coordinators, then shard delegates, then gateways.</li>
+<li>Confirm health (§5.6, §6) before considering the upgrade complete.</li>
+</ol>
+<p><strong>Bulk Auto-restart</strong>: in the instance list, tick instances and use <strong>Auto-restart ON / OFF</strong> to toggle <code>auto_restart</code> for all selected (local instances only).</p>
+<p><strong>Faucet</strong>: Tools → Faucet funds test addresses with XTT from a funded <strong>EVM (secp256k1) private key</strong>, signed like a wallet transaction and sent through the xtgw RPC (needs xtcn 0.10.23+ installed next to the Console; no delegate to pick). It shows the sender&#39;s and recipients&#39; shards and balances, refuses amounts above the sender&#39;s balance, skips recipients on a different shard than the sender, and confirms each credit. Fund a dedicated faucet account in the genesis manifest with a large allocation; Genesis does not fund any test accounts by default.</p>
+<p><strong>Gateway faucet and developer portal (0.10.29)</strong>: xtgw serves a developer web page at its RPC port and can run a built-in faucet. In xtgw.toml <code>[[chains]]</code> set <code>faucet_private_key_hex</code> (dedicated test account, plain text, fund it at genesis or by transfer), optionally <code>faucet_drip_wei</code> and <code>faucet_cooldown_secs</code>. Network-map-driven gateways (no <code>[[chains]]</code> entry) put the same three <code>faucet_*</code> lines at the TOP LEVEL of xtgw.toml, before the first <code>[table]</code>/<code>[[table]]</code> header. Share <code>http://&lt;xtgw-host&gt;:&lt;rpc-port&gt;/</code> with developers; they need no delegate access. Tell them to deploy contracts only with the portal or Console and to use MetaMask for transfers and calls. The Console&#39;s top-bar <strong>Developer mode</strong> toggle hides node-management screens for people who only develop.</p>
+<p><strong>Keys</strong>: Tools → Keys generates EVM (secp256k1) keys for wallets, deploy, call and faucet, and Ed25519 keys used only as delegate consensus identities — not for transactions.</p>
+<p><strong>Upgrades</strong>: new message types are added to the delegate protocol; upgrade <strong>all</strong> delegates of a chain together (mixed versions break on new messages and on gas/synthetic rule changes).</p>
+<h2 id="6-monitoring-forensics-in-console">6. Monitoring &amp; Forensics in Console</h2>
+<p><strong>Cross-shard transfer (Tools → Cross-shard (2PC))</strong>: starts an atomic multi-shard transfer through a <strong>local coordinator</strong> (xtcn <code>--start-2pc</code>; needs xtcn on the Console machine). Pick the coordinator&#39;s <code>node.toml</code>, the Console generates a fresh 64-hex transaction ID after every run (a coordinator silently ignores an ID it has already seen); wait about a minute between failed attempts, because an address with repeated timed-out 2PCs is briefly rate-limited, then add one group per shard: the shard, the sender&#39;s <strong>EVM (secp256k1) private key</strong> (must be on that shard — the Console shows the key&#39;s shard and blocks a mismatch), the recipient address (its shard is shown too), the amount in XTT and nonce (<code>auto</code>). Each group is either a <strong>Transfer</strong> or a <strong>Contract call</strong>: for a call, enter the contract address, paste its ABI, pick a function and fill its inputs (the Console encodes the calldata, checks that the contract is on the group&#39;s shard, and asks the gateway (<code>eth_getCode</code>) whether code actually exists there — a call to an address with no code on its shard only moves value and the function does not run, so the Console blocks it; raw hex is under Advanced). Each shard can appear once. Every shard applies its transfer or none does. Do not use it on a chain with <code>zero_gas_mode = true</code>: that mode tops senders up to the stipend before each native-signed transaction, so sender balances never fall and targets gain value from nowhere. With an xtgw RPC set, the Console polls <code>xt_getTwoPcRecordLocation</code> and reports when the coordinator has recorded the 2PC; open Explorer → shard 999 → that block to see the outcome. 2PC moves value; it does not remove the rule that a contract call must come from a key on the contract&#39;s shard.</p>
+<p><strong>Checkpoints (Explorer → Checkpoints)</strong>: every <code>checkpoint_interval</code> blocks (default 60) each shard&#39;s delegate signs its block hash and state root and sends them to the coordinator(s) in <code>coordinator_addresses</code>. The coordinator verifies the signature against the shard&#39;s key in <code>remote_shards</code>, keeps only the latest per shard (saved in <code>checkpoint-registry-&lt;chain&gt;-&lt;index&gt;.bin</code>) and records each accepted checkpoint in its own next block. Only 32-byte roots are stored — no transactions or accounts. The Checkpoints panel scans recent coordinator blocks (default 300) and shows each shard&#39;s latest checkpoint, the shard&#39;s current height, how far behind it is (amber above 180 blocks), the coordinator block that recorded it and its age. If a shard shows nothing, check its <code>coordinator_addresses</code>, the coordinator&#39;s <code>remote_shards</code>, and the coordinator log for &quot;rejected a Checkpoint&quot;. Checkpoints are anchors for proofs (<code>--request-proof</code>); they are not used for shard recovery.</p>
+<p>The Console&#39;s Explorer panel is the operator&#39;s day-2 health and investigation toolkit.</p>
+<ul>
+<li><strong>Known chains</strong> — the chains this Console instance knows an RPC endpoint for (chain ID + host + port).</li>
+<li><strong>Browse a block</strong> — fetch any block by shard + block number.</li>
+<li><strong>Known-chain health</strong> — a quick per-shard status check. Reaches only one delegate per shard (whichever the gateway routes to), so it cannot see a single shard&#39;s own internal consensus divergence.</li>
+<li><strong>Compare across delegates</strong> — asks every individual delegate behind a shard (or, for the coordinator chain, <code>shard_id = 999</code>, every coordinator address directly) for the same block, and flags any delegate whose hash disagrees with the majority. Catches internal consensus divergence that Known-chain health cannot see.</li>
+<li><strong>Divergence timeline</strong> — finds exactly where two delegates&#39; chains first disagreed. Two modes:<ul>
+<li><strong>Walk backward</strong> — checks one block at a time going back from a given height, with an adjustable lookback and a &quot;keep going&quot; resume button. Straightforward, but cost scales linearly with how far back the fork actually is.</li>
+<li><strong>Binary search</strong> — given one block known to diverge and one known to agree, finds the boundary in ~log₂(range) queries instead of one per block. The right choice when a fork was discovered long after it happened (hours or days), since a linear walk over that range would be far too slow. Relies on divergence being monotonic in block height (a delegate doesn&#39;t un-diverge without being explicitly resynced) — re-run if a delegate was resynced onto the majority chain between the two known points.</li>
+</ul>
+</li>
+<li><strong>Search</strong> — look up a transaction or block by hash.</li>
+</ul>
+<p><strong>No contract/wallet directory.</strong> There is no indexing layer behind Explorer — no RPC or panel lists every deployed contract or every wallet address on a shard, chain-wide, not even a count. Everything above is lookup-by-key (a block, a tx hash, a specific address) rather than enumeration. Answering &quot;how many contracts/wallets are on this chain&quot; today means scanning blocks yourself (or building a separate indexing solution) — there&#39;s nothing in Console to ask for it directly.</p>
+<p><strong>Recommended routine</strong>: run Known-chain health continuously (or on a schedule); when it flags a problem, or before anything looks wrong at all if you suspect a slow-forming fork, follow up with Compare across delegates on the affected shard, then Divergence timeline to pin down exactly where and when delegates split.</p>
+<p><strong>Example — the three forensic RPC calls behind Compare across delegates / Divergence timeline, callable directly if you&#39;re scripting a health check:</strong></p>
+<pre><code class="language-bash"># Compare across delegates, shard 0, block 89473
+curl -s http://localhost:8645 -X POST -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;xt_compareDelegates&quot;,&quot;params&quot;:[0,89473]}&#39;
+
+# Walk-backward divergence timeline from block 89473, up to 100 blocks back
+curl -s http://localhost:8645 -X POST -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;xt_findDivergence&quot;,&quot;params&quot;:[0,89473,100]}&#39;
+
+# Binary search between a known-diverging block and a known-agreeing block
+curl -s http://localhost:8645 -X POST -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;xt_binarySearchDivergence&quot;,&quot;params&quot;:[0,89473,89000]}&#39;
+</code></pre>
+<h2 id="7-troubleshooting">7. Troubleshooting</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Real cause</th>
+<th>Resolution</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>&quot;No real delegates known for that shard yet&quot; on shard 999 in Compare across delegates</td>
+<td>Fixed. Earlier builds had no self-registration mechanism for coordinator replicas, so the delegate registry was permanently empty for <code>shard_id = 999</code>.</td>
+<td>Update to a build after this fix — shard 999 now queries configured coordinator addresses directly instead of the delegate registry.</td>
+</tr>
+<tr>
+<td>Compare across delegates showed 3 rows per real delegate instead of 1</td>
+<td>Fixed. Multiple coordinators each reported the same delegate roster, and results weren&#39;t deduplicated by <code>delegate_index</code>.</td>
+<td>Update to a build after this fix.</td>
+</tr>
+<tr>
+<td><code>eth_getTransactionReceipt</code> always reports <code>status: 0x1</code>, even for a reverted transaction</td>
+<td>Fixed. Per-transaction execution status was computed but discarded before reaching the RPC layer.</td>
+<td>Update to a build after this fix. Requires rebuilding <code>xtcn</code> and <code>xtgw</code> together — this was a wire-format change.</td>
+</tr>
+<tr>
+<td>A submitted <code>eth_sendRawTransaction</code> (type-2/EIP-1559) is rejected with &quot;expected an RLP list (a legacy transaction), found a plain string&quot;</td>
+<td>By design, not a bug. Only legacy (type-0) transactions are supported.</td>
+<td>Ensure the wallet/tool sends a legacy transaction — standard wallets (MetaMask included) already default to this, since <code>baseFeePerGas</code> is deliberately omitted from block responses. See the Developer Manual §7 for detail.</td>
+</tr>
+<tr>
+<td>A delegate exited with &quot;FORK DETECTED&quot;</td>
+<td>Its block diverged from the group. 0.10.20 auto-recovery: it writes <code>fork-recovery-pending-&lt;chain&gt;-&lt;idx&gt;.txt</code>, exits, and on restart backs up its snapshot, account store and registries to <code>fork-backup-&lt;chain&gt;-&lt;idx&gt;-&lt;ts&gt;/</code>, then runs a state-sync from its peers (max 3 attempts, restoring the backup on failure).</td>
+<td>Make sure <strong>Auto-restart</strong> is on (Console list → select instances → Auto-restart ON). Read the fork incident report; if it fails 3 times, resync manually with <code>--request-state-sync</code>.</td>
+</tr>
+<tr>
+<td>Wallet tx stays Pending forever</td>
+<td><code>eth_chain_id</code> differs between xtgw and the shard delegates, or only one delegate (not the leader) holds the tx.</td>
+<td>Check delegate stderr for &quot;real EIP-155 signature failed to recover&quot;; align <code>eth_chain_id</code>; upgrade all shard delegates together.</td>
+</tr>
+<tr>
+<td>A wallet/Console deploy or transfer shows &quot;No receipt within 45s&quot; and the nonce never advances</td>
+<td>Before 0.10.27, xtgw sent a wallet-signed transaction to ONE delegate (the lowest index). A delegate only proposes from its OWN mempool and raw transactions are not gossiped, so a standby/suspended delegate held the tx forever.</td>
+<td>Use xtgw 0.10.27+: it now sends each wallet-signed tx to EVERY delegate of the sender&#39;s shard. Also check the delegate logs for <code>real wallet-signed transaction accepted into mempool</code> and <code>proposing block ... includes N real wallet-signed transaction(s)</code>.</td>
+</tr>
+<tr>
+<td>A contract deploy is mined but the receipt says <code>status 0x0</code> (reverted)</td>
+<td>The constructor rejected an argument (e.g. a <code>require(_feeBps &lt;= 10000)</code>), or gas ran out.</td>
+<td>The ABI cannot show <code>require</code> limits; read the contract source. Before 0.10.26 xtgw&#39;s <code>eth_estimateGas</code> always answered 21000 so every deploy ran out of gas; from 0.10.26 it returns a realistic estimate.</td>
+</tr>
+<tr>
+<td>A shard delegate is stuck at one height forever (log repeats <code>rejected synced block N — proposer P is not a legitimate leader ... (expected E ...)</code>)</td>
+<td>Its local election view (who is Active/Suspended) disagrees with the group, so it rejects blocks the majority finalized. A suspended delegate that falls into this cannot catch up, and keeps being re-suspended.</td>
+<td>0.10.25+ runs the same automatic fork recovery as for a parent_hash fork (back up, state-sync from peers, restart; needs auto-restart). Manual fix: stop it, <code>xtcn --request-state-sync &lt;node.toml&gt; &lt;peerIdx&gt;,&lt;peerIdx&gt;</code>, start it.</td>
+</tr>
+<tr>
+<td>The Explorer says &quot;that block doesn&#39;t exist on this shard&quot; for a block the other delegates have</td>
+<td>The gateway reads each shard from one delegate; if that delegate is stuck/behind it does not have the block.</td>
+<td>0.10.25+ xtgw reads from a delegate at the majority-committed tip and logs <code>WARNING shard S delegate D is BEHIND</code>. State-sync the delegate it names.</td>
+</tr>
+<tr>
+<td>A delegate refuses to start: &quot;genesis manifest declares zero_gas_mode=false, but this node is configured with zero_gas_mode=true&quot;</td>
+<td>From 0.10.24 every start checks <code>zero_gas_mode</code>, <code>fee_market_enabled</code> and <code>treasury_address_hex</code> against the signed genesis manifest.</td>
+<td>Make node.toml match the manifest (normally remove <code>zero_gas_mode = true</code>). Never use zero-gas mode on a testnet that should have real balances: it mints to native-signed senders and made 2PC &quot;create money&quot;.</td>
+</tr>
+<tr>
+<td>2PC reports &quot;No 2PC record seen after 60s&quot;</td>
+<td>The 2PC was not committed (aborted, lost decision, or a duplicate ID ignored as &quot;already in flight&quot;).</td>
+<td>The Console now creates a fresh ID per run. Check the coordinator and both shard logs; see &quot;2PC semantics&quot; in the Developer Manual.</td>
+</tr>
+<tr>
+<td>xtgw on a multi-machine setup can&#39;t reach delegates</td>
+<td><code>own_host</code> missing from <code>xtgw.toml</code>.</td>
+<td>Set <code>own_host</code> to the machine&#39;s LAN IP.</td>
+</tr>
+<tr>
+<td>A <code>node.toml</code> config edit doesn&#39;t take effect</td>
+<td><code>node.toml</code> changes require a restart.</td>
+<td>Restart the affected instance from its Console panel.</td>
+</tr>
+<tr>
+<td>Console can&#39;t reach a remote host under Live xtops connection</td>
+<td>Agent not running, wrong PKI folder pointed at, or network path blocked.</td>
+<td>Confirm <code>xtops-agent</code> is running on the remote host and the Console points at the exact folder containing its <code>ca-cert.pem</code>/<code>cert.pem</code>/<code>client-cert.pem</code>/<code>client-key.pem</code>.</td>
+</tr>
+<tr>
+<td>A trusted peer is rejected unexpectedly after a roster change</td>
+<td>Network map wasn&#39;t re-signed/republished after adding/removing a delegate, coordinator, or gateway.</td>
+<td>Re-publish the network map from the Console (§3.4); confirm <code>genesis_authority_pubkey_hex</code> and <code>network_map_path</code> are set on every affected instance.</td>
+</tr>
+<tr>
+<td>A block is silently missing transactions you know were submitted</td>
+<td>Submission rate exceeded <code>mempool_cap</code> for that block; the transaction is queued, not lost.</td>
+<td>Check again after the next block; if this recurs, <code>mempool_cap</code> may need raising — only after a real load test (§4, §6).</td>
+</tr>
+</tbody></table>
+<p><strong>Example — confirming the receipt-status fix is live after an upgrade (sanity check to run once per rebuild):</strong></p>
+<pre><code class="language-bash">curl -s http://localhost:8645 -X POST -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getTransactionReceipt&quot;,&quot;params&quot;:[&quot;0x&lt;a known-reverted tx hash&gt;&quot;]}&#39;
+# expect &quot;status&quot;:&quot;0x0&quot; for a known-reverted tx, not &quot;0x1&quot;
+</code></pre>
+</main></div>
+<footer class="site-footer"><div class="wrap"><span>© 2026 XTblock</span><span>XTblock XTB-Testnet-003 · xtcn 0.10.32 · Console 0.8.77</span></div></footer>
+<script src="assets/site.js"></script></body></html>

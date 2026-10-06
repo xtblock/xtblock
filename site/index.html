@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>XTblock XTB-Testnet-003 · XTblock</title><meta name="description" content="A permissioned, sharded, EVM-compatible blockchain with a desktop operator console and a developer portal.">
+<link rel="icon" href="data:,"><link rel="stylesheet" href="assets/style.css"></head>
+<body>
+<header class="site-header"><div class="wrap">
+  <a class="brand" href="index.html"><span class="logo">XT</span><span>XTblock</span></a>
+  <nav>
+    <a href="index.html#downloads" class="">Download</a>
+    <a href="operator.html" class="">Operator manual</a>
+    <a href="developer.html" class="">Developer manual</a>
+    <a href="release-notes.html" class="">Release notes</a>
+    <a href="https://github.com/XTblock/xtblock" rel="noopener">GitHub</a>
+    <button id="theme" aria-label="Toggle theme" title="Toggle theme">◐</button>
+  </nav>
+</div></header>
+<section class="hero"><div class="wrap">
+  <p class="eyebrow">XTB-Testnet-003 · public testnet release</p>
+  <h1>A permissioned, sharded, EVM-compatible blockchain with a desktop operator console and a developer portal.</h1>
+  <p class="lead">Run a delegate, operate a chain from the desktop Console, or just deploy and call contracts from a web page. No delegate access needed for developers.</p>
+  <div class="cta"><a class="btn primary" href="#downloads">Download</a><a class="btn" href="developer.html">Developer manual</a><a class="btn" href="operator.html">Operator manual</a></div>
+</div></section>
+
+<section class="wrap grid3">
+  <article><h3>Sharded EVM</h3><p>Accounts and contracts live on shards chosen by address hash. A coordinator chain anchors shard checkpoints and records cross-shard (2PC) outcomes.</p></article>
+  <article><h3>Wallet compatible</h3><p>Send legacy (EIP-155) transactions with MetaMask, ethers or web3 through the xtgw gateway. Native token XTT, 18 decimals.</p></article>
+  <article><h3>Developer portal</h3><p>Every gateway serves a web page with wallet, contract deploy and call, block explorer and a test faucet. Deploys align to your shard automatically.</p></article>
+  <article><h3>Operator Console</h3><p>Desktop app to create and monitor instances, build genesis manifests and network maps, run 2PC transfers and browse the chain. A Developer mode hides node management.</p></article>
+  <article><h3>Fault tolerant</h3><p>DPoS delegates with suspension and slashing, state sync, and automatic fork recovery with backups.</p></article>
+  <article><h3>Atomic cross-shard</h3><p>Two-phase commit across shards: all legs commit or none are applied.</p></article>
+</section>
+
+<section class="wrap" id="downloads">
+  <h2>Download</h2>
+  <p class="muted">Releases are published on GitHub. Download the newest Console installer from the latest release. Every delegate of a chain must run the same version (xtcn 0.10.32, bundled).</p>
+  <div class="dl">
+    <a class="card" href="https://github.com/XTblock/xtblock/releases/latest"><strong>XTblock Console</strong><span>Desktop app for Windows. Includes the delegate node (xtcn) and gateway (xtgw), so there is nothing else to install. Version 0.8.77.</span><em>Download latest →</em></a>
+    <a class="card" href="https://github.com/XTblock/xtblock/releases"><strong>All releases</strong><span>Older versions and release notes.</span><em>Browse →</em></a>
+  </div>
+</section>
+
+<section class="wrap" id="start">
+  <h2>Start in five minutes</h2>
+  <div class="grid2">
+    <div class="panel"><h3>I am a developer</h3><ol>
+      <li>Get the gateway address from your network operator.</li>
+      <li>Open <code>http://&lt;gateway&gt;:&lt;port&gt;/</code> in a browser.</li>
+      <li>Create a wallet, request test XTT from the faucet.</li>
+      <li>Deploy and call your contract in the Deploy and Call tabs.</li>
+    </ol><p><a href="developer.html">Read the developer manual →</a></p></div>
+    <div class="panel"><h3>I run nodes</h3><ol>
+      <li>Install the Console (it bundles the node and gateway).</li>
+      <li>Create a delegate instance and start it.</li>
+      <li>Build a genesis manifest and network map for a multi-delegate chain.</li>
+      <li>Start the gateway and share its portal address with developers.</li>
+    </ol><p><a href="operator.html">Read the operator manual →</a></p></div>
+  </div>
+</section>
+
+<section class="wrap notice"><h2>Testnet notice</h2>
+  <p>XTB-Testnet-003 is a test network. Tokens have no value and the network may be reset. Contracts must be deployed with the developer portal or the Console so the contract address lands on your own shard; use wallets for transfers and calls. See the <a href="release-notes.html">release notes</a> for known limitations.</p>
+</section>
+<footer class="site-footer"><div class="wrap"><span>© 2026 XTblock</span><span>XTblock XTB-Testnet-003 · xtcn 0.10.32 · Console 0.8.77</span></div></footer>
+<script src="assets/site.js"></script></body></html>
