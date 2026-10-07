@@ -51,7 +51,7 @@ const page = (title, active, inner, desc = "") => `<!doctype html>
 <title>${esc(title)} · ${cfg.productName}</title><meta name="description" content="${esc(desc || cfg.tagline)}">
 <link rel="icon" href="data:,"><link rel="stylesheet" href="assets/style.css"></head>
 <body>${nav(active)}${inner}
-<footer class="site-footer"><div class="wrap"><span>© ${new Date().getFullYear()} ${cfg.orgName}</span><span>${cfg.productName} ${cfg.networkName} · xtcn ${cfg.xtcnVersion} · Console ${cfg.consoleVersion}</span></div></footer>
+<footer class="site-footer"><div class="wrap"><span>© ${new Date().getFullYear()} ${cfg.orgName}</span><span>${cfg.productName} · xtcn ${cfg.xtcnVersion} · Console ${cfg.consoleVersion}</span></div></footer>
 <script src="assets/site.js"></script></body></html>`;
 
 function docPage(file, out, title, active) {
