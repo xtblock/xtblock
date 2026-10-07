@@ -35,7 +35,7 @@ function render(md) {
 
 const nav = (active) => `
 <header class="site-header"><div class="wrap">
-  <a class="brand" href="index.html"><span class="logo">XT</span><span>${cfg.productName}</span></a>
+  <a class="brand" href="index.html"><span class="logo">${cfg.productName}</span></a>
   <nav>
     <a href="index.html#downloads" class="${active === "dl" ? "on" : ""}">Download</a>
     <a href="operator.html" class="${active === "op" ? "on" : ""}">Operator manual</a>
@@ -80,7 +80,6 @@ if (cut > 0) rn = rn.slice(0, cut);
 // Landing page.
 const landing = `
 <section class="hero"><div class="wrap">
-  <p class="eyebrow">${cfg.networkName} · public testnet release</p>
   <h1>${esc(cfg.tagline)}</h1>
   <p class="lead">Run a delegate, operate a chain from the desktop Console, or just deploy and call contracts from a web page. No delegate access needed for developers.</p>
   <div class="cta"><a class="btn primary" href="#downloads">Download</a><a class="btn" href="developer.html">Developer manual</a><a class="btn" href="operator.html">Operator manual</a></div>
@@ -121,9 +120,6 @@ const landing = `
     </ol><p><a href="operator.html">Read the operator manual →</a></p></div>
   </div>
 </section>
-
-<section class="wrap notice"><h2>Testnet notice</h2>
-  <p>${cfg.networkName} is a test network. Tokens have no value and the network may be reset. Contracts must be deployed with the developer portal or the Console so the contract address lands on your own shard; use wallets for transfers and calls. See the <a href="release-notes.html">release notes</a> for known limitations.</p>
-</section>`;
-fs.writeFileSync(path.join(root, "index.html"), page(`${cfg.productName} ${cfg.networkName}`, "", landing));
+`;
+fs.writeFileSync(path.join(root, "index.html"), page(`${cfg.productName}`, "", landing));
 console.log("wrote index.html");
