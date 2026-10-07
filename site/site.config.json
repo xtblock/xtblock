@@ -1,6 +1,6 @@
 {
   "orgName": "XTblock",
-  "productName": "XTblock Console",
+  "productName": "XTblock",
   "tagline": "A permissioned, sharded, parallel execution, EVM-compatible blockchain with a desktop operator console and a developer portal.",
   "githubRepo": "XTblock/xtblock",
   "networkName": "XTB-Testnet-003",
