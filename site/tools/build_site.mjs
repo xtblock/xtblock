@@ -35,7 +35,7 @@ function render(md) {
 
 const nav = (active) => `
 <header class="site-header"><div class="wrap">
-  <a class="brand" href="index.html"><span class="logo">${cfg.productName}</span></a>
+  <a class="brand" href="index.html"><span class="logo">XT</span> <span>${cfg.productName}</span></a>
   <nav>
     <a href="index.html#downloads" class="${active === "dl" ? "on" : ""}">Download</a>
     <a href="operator.html" class="${active === "op" ? "on" : ""}">Operator manual</a>
