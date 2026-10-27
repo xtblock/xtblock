@@ -35,7 +35,7 @@ function render(md) {
 
 const nav = (active) => `
 <header class="site-header"><div class="wrap">
-  <a class="brand" href="index.html"><span class="logo">XT</span> <span>${cfg.productName}</span></a>
+  <a class="brand" href="index.html"><span class="logo">XT</span><span>${cfg.productName}</span></a>
   <nav>
     <a href="index.html#downloads" class="${active === "dl" ? "on" : ""}">Download</a>
     <a href="operator.html" class="${active === "op" ? "on" : ""}">Operator manual</a>
@@ -51,7 +51,7 @@ const page = (title, active, inner, desc = "") => `<!doctype html>
 <title>${esc(title)} · ${cfg.productName}</title><meta name="description" content="${esc(desc || cfg.tagline)}">
 <link rel="icon" href="data:,"><link rel="stylesheet" href="assets/style.css"></head>
 <body>${nav(active)}${inner}
-<footer class="site-footer"><div class="wrap"><span>© ${new Date().getFullYear()} ${cfg.orgName}</span><span>${cfg.productName} · xtcn ${cfg.xtcnVersion} · Console ${cfg.consoleVersion}</span></div></footer>
+<footer class="site-footer"><div class="wrap"><span>© ${new Date().getFullYear()} ${cfg.orgName}</span><span>${cfg.productName} ${cfg.networkName} · xtcn ${cfg.xtcnVersion} · Console ${cfg.consoleVersion}</span></div></footer>
 <script src="assets/site.js"></script></body></html>`;
 
 function docPage(file, out, title, active) {
@@ -80,6 +80,7 @@ if (cut > 0) rn = rn.slice(0, cut);
 // Landing page.
 const landing = `
 <section class="hero"><div class="wrap">
+  <p class="eyebrow">${cfg.networkName} · public testnet release</p>
   <h1>${esc(cfg.tagline)}</h1>
   <p class="lead">Run a delegate, operate a chain from the desktop Console, or just deploy and call contracts from a web page. No delegate access needed for developers.</p>
   <div class="cta"><a class="btn primary" href="#downloads">Download</a><a class="btn" href="developer.html">Developer manual</a><a class="btn" href="operator.html">Operator manual</a></div>
@@ -90,7 +91,9 @@ const landing = `
   <article><h3>Wallet compatible</h3><p>Send legacy (EIP-155) transactions with MetaMask, ethers or web3 through the xtgw gateway. Native token XTT, 18 decimals.</p></article>
   <article><h3>Developer portal</h3><p>Every gateway serves a web page with wallet, contract deploy and call, block explorer and a test faucet. Deploys align to your shard automatically.</p></article>
   <article><h3>Operator Console</h3><p>Desktop app to create and monitor instances, build genesis manifests and network maps, run 2PC transfers and browse the chain. A Developer mode hides node management.</p></article>
-  <article><h3>Fault tolerant</h3><p>DPoS delegates with suspension and slashing, state sync, and automatic fork recovery with backups.</p></article>
+  <article><h3>Forensics</h3><p>Search the full transaction history of any address, trace internal contract calls, export signed evidence that can be verified offline, and compare account snapshots. Needs delegates running the history archive.</p></article>
+  <article><h3>Explorer</h3><p>Browse your chains inside the Console: blocks, transactions, address history and cross-shard (2PC) lookups, across every shard.</p></article>
+  <article><h3>Fault tolerant</h3><p>DPoS delegates with suspension and slashing, state sync, automatic fork recovery with backups, and crash-safe state files that survive a power loss.</p></article>
   <article><h3>Atomic cross-shard</h3><p>Two-phase commit across shards: all legs commit or none are applied.</p></article>
 </section>
 
@@ -120,6 +123,9 @@ const landing = `
     </ol><p><a href="operator.html">Read the operator manual →</a></p></div>
   </div>
 </section>
-`;
-fs.writeFileSync(path.join(root, "index.html"), page(`${cfg.productName}`, "", landing));
+
+<section class="wrap notice"><h2>Testnet notice</h2>
+  <p>${cfg.networkName} is a test network. Tokens have no value and the network may be reset. Contracts must be deployed with the developer portal or the Console so the contract address lands on your own shard; use wallets for transfers and calls. See the <a href="release-notes.html">release notes</a> for known limitations.</p>
+</section>`;
+fs.writeFileSync(path.join(root, "index.html"), page(`${cfg.productName} ${cfg.networkName}`, "", landing));
 console.log("wrote index.html");
