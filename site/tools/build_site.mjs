@@ -51,7 +51,7 @@ const page = (title, active, inner, desc = "") => `<!doctype html>
 <title>${esc(title)} · ${cfg.productName}</title><meta name="description" content="${esc(desc || cfg.tagline)}">
 <link rel="icon" href="data:,"><link rel="stylesheet" href="assets/style.css"></head>
 <body>${nav(active)}${inner}
-<footer class="site-footer"><div class="wrap"><span>© ${new Date().getFullYear()} ${cfg.orgName}</span><span>${cfg.productName} ${cfg.networkName} · xtcn ${cfg.xtcnVersion} · Console ${cfg.consoleVersion}</span></div></footer>
+<footer class="site-footer"><div class="wrap"><span>© ${new Date().getFullYear()} ${cfg.orgName}</span><span>${cfg.productName} · xtcn ${cfg.xtcnVersion} · Console ${cfg.consoleVersion}</span></div></footer>
 <script src="assets/site.js"></script></body></html>`;
 
 function docPage(file, out, title, active) {
@@ -80,7 +80,6 @@ if (cut > 0) rn = rn.slice(0, cut);
 // Landing page.
 const landing = `
 <section class="hero"><div class="wrap">
-  <p class="eyebrow">${cfg.networkName} · public testnet release</p>
   <h1>${esc(cfg.tagline)}</h1>
   <p class="lead">Run a delegate, operate a chain from the desktop Console, or just deploy and call contracts from a web page. No delegate access needed for developers.</p>
   <div class="cta"><a class="btn primary" href="#downloads">Download</a><a class="btn" href="developer.html">Developer manual</a><a class="btn" href="operator.html">Operator manual</a></div>
@@ -125,7 +124,7 @@ const landing = `
 </section>
 
 <section class="wrap notice"><h2>Testnet notice</h2>
-  <p>${cfg.networkName} is a test network. Tokens have no value and the network may be reset. Contracts must be deployed with the developer portal or the Console so the contract address lands on your own shard; use wallets for transfers and calls. See the <a href="release-notes.html">release notes</a> for known limitations.</p>
+  <p>This is a test network. Tokens have no value and the network may be reset. Contracts must be deployed with the developer portal or the Console so the contract address lands on your own shard; use wallets for transfers and calls. See the <a href="release-notes.html">release notes</a> for known limitations.</p>
 </section>`;
-fs.writeFileSync(path.join(root, "index.html"), page(`${cfg.productName} ${cfg.networkName}`, "", landing));
+fs.writeFileSync(path.join(root, "index.html"), page(`${cfg.productName}`, "", landing));
 console.log("wrote index.html");
